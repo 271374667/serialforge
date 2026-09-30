@@ -1,0 +1,72 @@
+# serialforge · 架构总览
+
+> 类型: 活文档（原地更新，不编号、不归档）  |  最后更新: 2026-09-30
+> 基线 commit: 未提交（M1 开发中）  |  适用版本: 0.0.1
+> 形态: 完整  |  维护: AI 更新（见 `.agents/rules/15_architecture_doc.md`）
+> 读法: 第 1、2、3、6 节为必读区（每次会话读，合计 ≤150 行）；其余按需读
+
+## 1. 这个项目是干什么的（必读）
+
+- **一句话**：serialforge 为 Windows x64 应用提供基于 QtCore 信号槽和线程的串口通讯、设备发现与命令调度能力。
+- **背景与动因**：把串口字节流、帧定界、设备探测、命令响应和日志封装为可发布到 PyPI 的库，让 PySide6 应用只接触稳定的门面 API。
+- **明确不做**：不包含任何具体设备业务命令；不使用 asyncio 或多进程；不导入 QtWidgets/QtGui；不承诺 Linux、32 位 Windows 或硬件无关的真机行为。
+
+## 2. 外部形态（必读）
+
+- 交付物：可安装的 Python 库 `serialforge`，另有无硬件示例和本地 CI 脚本。
+- 运行方式：使用方 `from serialforge import ...`；业务命令运行时声明并注册；Qt 应用提供 `QCoreApplication` 事件循环。
+- 关键依赖：Python >=3.11；`PySide6-Essentials`（只用 QtCore）、`pyserial`、`loguru`；uv + hatchling 构建。
+
+## 3. 模块地图（必读）
+
+| 模块 / 目录 | 职责（一句话） | 入口（文件:类） | 对外提供 | 依赖谁 | 被谁依赖 |
+| --- | --- | --- | --- | --- | --- |
+| `src/serialforge/enums.py` | 稳定枚举 | 定义层 | 顶层与 advanced 枚举 | 标准库 | 所有层 |
+| `src/serialforge/models.py` | 不可变声明、结果与配置数据类 | 定义层 | 顶层日常数据类 | enums/errors/advanced 类型约束 | 所有层 |
+| `src/serialforge/errors.py` | 异常层次 | 定义层 | `errors` 命名空间 | 标准库 | 所有层 |
+| `src/serialforge/settings.py` | 默认配置常量 | 定义层 | 内部默认值 | 标准库 | 定义层与实现层 |
+| `src/serialforge/protocols.py` | 后端与传输协议 | 定义层 | 内部协议 | models | transport/discovery/connection |
+| `src/serialforge/advanced.py` | 进阶配置和统计再导出 | 再出口 | `advanced.__all__` | 定义层 | 使用方与实现层 |
+| `src/serialforge/transport/` | 字节流、定界、校验、端口后端 | M2 实现 | 内部模块 | L0 | discovery/connection |
+| `src/serialforge/connection/` | handler、注册表、调度、重连 | M4/M5 实现 | 顶层门面 | L0-L2 | `__init__.py` |
+| `src/serialforge/discovery/` | 扫描、探测、缓存 | M6 实现 | `DeviceFinder` | L0-L1 | connection/顶层 |
+| `src/serialforge/diagnostics/` | 流量与文件日志 | M3 实现 | advanced 记录类型 | L0-L1 | connection |
+| `src/serialforge/testing/` | 假后端与模拟设备 | M2 实现 | testing 命名空间 | L0-L1 | tests/使用方 |
+| `tests/` | 契约、守卫、单元和 API 快照 | `test_*.py` | 本地验证 | src | CI |
+
+## 4. 交互关系（按需）
+
+- 依赖单向：定义层 L0 → transport/diagnostics L1 → discovery/testing L2 → connection L3 → 顶层再导出 L4。
+- 典型路径：`SerialHandler.connect()` 通过 discovery 获取端口，再由 transport 读写；命令经 registry/dispatcher 匹配并以 Qt 信号发送结果。
+- M1 只建立定义层、命名空间空壳和契约测试，真实 I/O 在 M2 以后实现。
+
+## 5. 状态与外部边界（按需）
+
+- 外部 I/O：M2 起由 pyserial 访问串口；QtCore 负责线程与信号；loguru 在 M3 接入。
+- 配置：人写的工具配置保留根目录 `pyproject.toml`；运行时日志、缓存和状态按项目规则进入 `data/` 或用户目录。
+- 发布：`uv build` 产出构建物；严禁在本项目中执行 PyPI 上传。
+
+## 6. 关键不变量（必读，最容易改错的地方）
+
+- 顶层 `__all__` 恰为设计文档的 15 个名字 —— **违反**：破坏公共 API 预算和快照 —— **生效范围**：`src/serialforge/__init__.py`。
+- `CommandSpec` / `EventSpec` 是 `frozen=True, eq=False` 且全链路保留同一对象 —— **违反**：`result.spec is X` 失效 —— **生效范围**：models、registry、dispatcher、Qt 信号。
+- 定义层不导入实现子包，跨子包只经 `__init__.py` —— **违反**：循环依赖和架构守卫失败 —— **生效范围**：`src/serialforge/`。
+- 库内只使用 loguru DEBUG 且默认静默 —— **违反**：宿主应用收到意外输出或等级 —— **生效范围**：diagnostics 与 connection。
+- 不在源码定义业务 `CommandSpec` / `EventSpec` —— **违反**：库无法复用于不同设备 —— **生效范围**：`src/serialforge/`。
+- Qt 依赖限于 QtCore，导入无线程、文件、串口和应用初始化副作用 —— **违反**：无界面导入环境被污染 —— **生效范围**：顶层导入与所有定义层模块。
+- 已知坑：当前用户级 `scaffold.py` 有冲突标记；M1 规范目录由模板手动落地，需在交付记录中保留该事实。
+
+## 7. 深潜入口（按需）
+
+| 想深入 | 读什么 |
+| --- | --- |
+| 设计契约 | `串口通讯模块_方案_v10定稿.md` |
+| M1 进度 | `.agents/docs/checkpoint/0001_m1-foundation.md` 与 `docs/progress/M1.md` |
+| 任务队列 | `.agents/docs/todo/README.md` |
+| 定义层实现 | `src/serialforge/enums.py`、`models.py`、`errors.py`、`advanced.py` |
+
+## 8. 变更日志（按需，倒序）
+
+| 日期 | commit | 改了什么 |
+| --- | --- | --- |
+| 2026-09-30 | 未提交 | 初始化架构总览并记录 M1 定义层计划 |

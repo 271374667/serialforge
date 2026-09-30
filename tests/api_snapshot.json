@@ -1,0 +1,54 @@
+{
+  "serialforge": [
+    "SerialHandler",
+    "DeviceFinder",
+    "DeviceProfile",
+    "CommandSpec",
+    "EventSpec",
+    "LogConfig",
+    "CommandResult",
+    "DeviceEvent",
+    "DeviceInfo",
+    "CommandStatus",
+    "ConnectionState",
+    "ResponseMode",
+    "Correlation",
+    "ScanMode",
+    "SerialForgeError"
+  ],
+  "advanced": [
+    "SerialConfig",
+    "DataBits",
+    "Parity",
+    "StopBits",
+    "FlowControl",
+    "ProbeSpec",
+    "FramingMode",
+    "FramingConfig",
+    "Checksum",
+    "CommandPriority",
+    "CommandTicket",
+    "SendRoute",
+    "TimeoutPolicy",
+    "TrafficRecord",
+    "ReadLoopConfig",
+    "RuntimeConfig",
+    "HandlerStats"
+  ],
+  "errors": [
+    "SerialForgeError",
+    "PortBusyError",
+    "PortNotFoundError",
+    "PermissionDeniedError",
+    "ProbeError",
+    "FramingError",
+    "CommandError",
+    "ConfigError"
+  ],
+  "testing": [
+    "FakeBackend",
+    "FakeTransport",
+    "SimulatedDevice",
+    "use_fake_backend"
+  ]
+}

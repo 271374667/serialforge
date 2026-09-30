@@ -1,0 +1,66 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "serialforge"
+version = "0.0.1"
+description = "PySide6 serial communication toolkit for Windows"
+readme = "README.md"
+license = { text = "MIT" }
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+dependencies = [
+    "loguru>=0.7",
+    "PySide6-Essentials>=6.5",
+    "pyserial>=3.5",
+]
+classifiers = [
+    "Operating System :: Microsoft :: Windows :: Windows 10",
+    "Operating System :: Microsoft :: Windows :: Windows 11",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Terminals :: Serial",
+    "Typing :: Typed",
+]
+
+[dependency-groups]
+dev = [
+    "pylint",
+    "pytest",
+    "pytest-qt",
+    "ruff",
+    "twine",
+    "ty",
+    "typing-extensions>=4.6",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/serialforge"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+markers = [
+    "hardware: requires a real Windows serial device",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 80
+exclude = [".agents", "temp", "outputs"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ty.environment]
+python-version = "3.11"
+python-platform = "win32"
+
+[tool.ty.src]
+exclude = [".agents", ".venv", "dist", "build"]
+
+[tool.ty.rules]
+all = "error"
