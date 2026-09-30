@@ -60,7 +60,7 @@ python-version = "3.11"
 python-platform = "win32"
 
 [tool.ty.src]
-exclude = [".agents", ".venv", "dist", "build"]
+exclude = [".agents", ".venv", "dist", "build", "temp"]
 
 [tool.ty.rules]
 all = "error"

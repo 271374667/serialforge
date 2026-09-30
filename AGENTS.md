@@ -12,7 +12,7 @@
 | 入口 | `src/serialforge/__init__.py`；开发脚本在 `scripts/` |
 | 构建 | `uv build` |
 | 测试 | `uv run pytest`；阶段 CI 为 `uv run python scripts/ci.py` |
-| 当前阶段 | M1：包骨架与定义层 |
+| 当前阶段 | M2：传输层与无硬件测试后端 |
 | 架构总览 | `.agents/ARCHITECTURE.md`（第 1、2、3、6 节为每次必读区，≤150 行） |
 
 目录重点：`src/serialforge/` 是源码，`tests/` 是测试，`examples/` 放使用方命令示例，`.agents/` 放项目规范与交接文档；本 skill 不复制进项目技能目录。
@@ -48,5 +48,5 @@
 
 - 发现文档与代码不符时立即更新 `.agents/ARCHITECTURE.md`。
 - 长任务使用 `.agents/docs/todo/README.md` 唯一调度索引；同一时间最多一个激活任务。
-- M1 收尾只对本次修改文件运行格式化与类型检查，并如实记录 ty、Windows 真机和硬件未验证项。
+- 每个里程碑实现、测试、汇报后停下等待确认；收尾只对本次修改文件运行格式化与类型检查，并如实记录 ty、Windows 真机和硬件未验证项。
 - `project-ai-normalize` 脚手架当前含冲突标记，不能执行；本次规范目录按其模板手动生成，工具修复留作项目外问题。

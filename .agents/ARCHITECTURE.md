@@ -1,7 +1,7 @@
 # serialforge · 架构总览
 
 > 类型: 活文档（原地更新，不编号、不归档）  |  最后更新: 2026-09-30
-> 基线 commit: 未提交（M1 开发中）  |  适用版本: 0.0.1
+> 基线 commit: 待提交（M2 已完成，等待阶段确认）  |  适用版本: 0.0.1
 > 形态: 完整  |  维护: AI 更新（见 `.agents/rules/15_architecture_doc.md`）
 > 读法: 第 1、2、3、6 节为必读区（每次会话读，合计 ≤150 行）；其余按需读
 
@@ -27,18 +27,18 @@
 | `src/serialforge/settings.py` | 默认配置常量 | 定义层 | 内部默认值 | 标准库 | 定义层与实现层 |
 | `src/serialforge/protocols.py` | 后端与传输协议 | 定义层 | 内部协议 | models | transport/discovery/connection |
 | `src/serialforge/advanced.py` | 进阶配置和统计再导出 | 再出口 | `advanced.__all__` | 定义层 | 使用方与实现层 |
-| `src/serialforge/transport/` | 字节流、定界、校验、端口后端 | M2 实现 | 内部模块 | L0 | discovery/connection |
+| `src/serialforge/transport/` | 字节流、定界、校验、延迟与端口后端 | `__init__.py`：M2 传输组件 | 内部模块 | L0 | discovery/connection/testing |
 | `src/serialforge/connection/` | handler、注册表、调度、重连 | M4/M5 实现 | 顶层门面 | L0-L2 | `__init__.py` |
 | `src/serialforge/discovery/` | 扫描、探测、缓存 | M6 实现 | `DeviceFinder` | L0-L1 | connection/顶层 |
 | `src/serialforge/diagnostics/` | 流量与文件日志 | M3 实现 | advanced 记录类型 | L0-L1 | connection |
-| `src/serialforge/testing/` | 假后端与模拟设备 | M2 实现 | testing 命名空间 | L0-L1 | tests/使用方 |
+| `src/serialforge/testing/` | 可脚本化假后端与模拟设备 | `__init__.py`：M2 假后端组件 | testing 命名空间 | L0-L1 | tests/使用方 |
 | `tests/` | 契约、守卫、单元和 API 快照 | `test_*.py` | 本地验证 | src | CI |
 
 ## 4. 交互关系（按需）
 
 - 依赖单向：定义层 L0 → transport/diagnostics L1 → discovery/testing L2 → connection L3 → 顶层再导出 L4。
 - 典型路径：`SerialHandler.connect()` 通过 discovery 获取端口，再由 transport 读写；命令经 registry/dispatcher 匹配并以 Qt 信号发送结果。
-- M1 只建立定义层、命名空间空壳和契约测试，真实 I/O 在 M2 以后实现。
+- M1 建立定义层、命名空间与契约测试；M2 只实现可替换传输层、帧/校验/延迟基础设施和无硬件测试后端，不提前实现 connection/discovery 门面。
 
 ## 5. 状态与外部边界（按需）
 
@@ -61,7 +61,8 @@
 | 想深入 | 读什么 |
 | --- | --- |
 | 设计契约 | `串口通讯模块_方案_v10定稿.md` |
-| M1 进度 | `.agents/docs/checkpoint/0001_m1-foundation.md` 与 `docs/progress/M1.md` |
+| M1 进度 | `.agents/docs/checkpoint/_archive/0001_m1-foundation.md` |
+| M2 交接 | `.agents/docs/checkpoint/_archive/0002_m2-transport.md` |
 | 任务队列 | `.agents/docs/todo/README.md` |
 | 定义层实现 | `src/serialforge/enums.py`、`models.py`、`errors.py`、`advanced.py` |
 
@@ -69,4 +70,5 @@
 
 | 日期 | commit | 改了什么 |
 | --- | --- | --- |
-| 2026-09-30 | 未提交 | 初始化架构总览并记录 M1 定义层计划 |
+| 2026-09-30 | 待提交 | 完成 M2 传输基础设施、假后端和规范化迁移；等待阶段确认 |
+| 2026-09-30 | 98ba269 | 完成 M1 定义层与规范目录；进入 M2 传输层开发 |

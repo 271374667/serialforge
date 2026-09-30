@@ -4,13 +4,13 @@
 > 被要求「继续任务」时**只读这一个文件**——不要 ls 目录、不要逐个读 todo 文档（省 token）。
 > 维护一律用 `python .agents/tools/taskmgr.py`，不要手改表格。
 > 规则见 `.agents/rules/07_task_tracking.md` §2。
-> 最后更新: 2026-09-30  |  激活任务: 0001_M1-foundation
+> 最后更新: 2026-09-30  |  激活任务: （无）
 
 ## 激活中（同时最多一个）
 
 | 编号 | 任务 | 优先级 | 关联 checkpoint |
 | --- | --- | --- | --- |
-| 0001 | [0001_M1-foundation](./0001_M1-foundation.md) | 高 | checkpoint/0001_m1-foundation.md |
+| - | （无） | - | - |
 
 ## 排队中（按 优先级 → 编号 排序）
 

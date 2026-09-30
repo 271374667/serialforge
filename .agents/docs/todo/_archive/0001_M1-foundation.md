@@ -1,6 +1,8 @@
+> 归档时间: 2026-09-30  |  归档原因: 任务已完成  |  原路径: .agents/docs/todo/0001_M1-foundation.md
+
 # 0001 M1 foundation
 
-> 状态: 进行中  |  创建: 2026-09-30  |  完成: -
+> 状态: 已完成  |  创建: 2026-09-30  |  完成: 2026-09-30
 > 优先级: 高  |  关联 checkpoint: checkpoint/0001_m1-foundation.md
 
 ## 背景
@@ -13,7 +15,7 @@
 - [x] `CommandSpec`、`EventSpec`、`DeviceProfile`、`LogConfig`、结果类和 M1 进阶配置具备构造期校验及不可变契约。
 - [x] `CommandSpec`/`EventSpec` 模式推断、默认值、对象身份语义和 `DeviceProfile` 默认 8N1 有测试。
 - [x] `test_architecture.py`、API 快照骨架、`tests/typing/qt_smoke.py`、`scripts/ci.py` 可运行。
-- [x] `docs/progress/M1.md` 记录三项 ty 未验证点、命令结果、假设与未在真机验证项。
+- [x] `.agents/docs/checkpoint/0001_m1-foundation.md` 记录三项 ty 未验证点、命令结果、假设与未在真机验证项。
 
 ## 阻塞 / 依赖
 
@@ -21,4 +23,4 @@
 
 ## 完成记录
 
-M1 验收已在 2026-09-30 完成，等待用户确认后进入 M2；全量本地 CI 通过，未进行真实串口或 Windows 10 验证。
+M1 验收已在 2026-09-30 完成；全量本地 CI 通过，未进行真实串口或 Windows 10 验证。进度记录已迁入 `.agents/docs/checkpoint/`，旧的 `docs/progress/M1.md` 已归档。
