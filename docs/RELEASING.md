@@ -55,11 +55,17 @@ uv run python scripts/release.py
 `publish pypi`。默认目标是 TestPyPI。传输令牌由 uv 从 `UV_PUBLISH_TOKEN` 或系统 keyring
 读取，不写入仓库、参数或日志；TestPyPI 和 PyPI 使用各自的账户与令牌。
 
-TestPyPI 安装验证应在仓库外执行 `uv run --no-project --isolated --with
-"serialforge==<版本>" --default-index https://test.pypi.org/simple --index
-https://pypi.org/simple python -c "import serialforge"`，确认拿到 TestPyPI 上的目标版本。
-然后用本仓库的外置 Demo 和测试做验收。已用过的 PyPI 版本不能重传；首次上传后改用
-项目范围令牌。使用方依赖从 PyPI 获取，库不采用 Trusted Publishing 或云端 CI。
+TestPyPI 安装验证在仓库外执行。从 TestPyPI 目标版本的文件列表取得 wheel 的完整
+HTTPS 下载 URL（`test-files.pythonhosted.org`），替换下面的占位符：
+
+```powershell
+uv run --no-project --isolated --python 3.11 --with "<TestPyPI wheel 的完整 HTTPS URL>" --default-index https://pypi.org/simple python -c "from importlib.metadata import version; import serialforge; print(version('serialforge'), serialforge.__file__)"
+```
+
+核对版本和安装位置，然后用本仓库的外置 Demo 和测试做验收。直接指定目标 wheel，
+运行依赖从 PyPI 获取；不要混用两个索引搜索 serialforge，避免选到 PyPI 的同名版本
+或 TestPyPI 上不完整的依赖。已用过的 PyPI 版本不能重传；首次上传后改用项目范围
+令牌。库不采用 Trusted Publishing 或云端 CI。
 
 本项目规则禁止 AI 执行 `scripts/release.py --publish`、`uv publish`、`git push` 或
 创建 tag。
