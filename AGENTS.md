@@ -42,7 +42,7 @@
 5. `CommandSpec` / `EventSpec` 必须是 `frozen=True, eq=False`，库内不得复制或重建它们；结果通过对象身份判断。
 6. serialforge 源码不包含具体业务命令；业务命令只能在 `examples/` 与 `tests/` 声明。
 7. 库内日志只用 loguru DEBUG，默认静默；不得执行 PyPI 上传，不生成云端 CI。
-8. 未经用户明确许可不 `git push`；当前快速迭代阶段直接在 `dev` 开发和提交，不新建 `feat/*` / `fix/*` 分支，直到用户明确宣布稳定后恢复特性分支规则；提交信息使用中文 Conventional Commits 和 AI trailers。
+8. `master` 是主分支，必须始终包含完整可用的代码（可构建、可导入、已通过阶段验收），只由用户在明确要求时接受来自 `dev` 的合并来更新，AI 不主动向 `master` 提交或合并；`dev` 是开发分支，不保证稳定可用，日常开发、提交与实验性改动都在 `dev` 进行，绝不在 `master` 上直接动手。未经用户明确许可不 `git push`；当前快速迭代阶段在 `dev` 上不新建 `feat/*` / `fix/*` 分支，直到用户明确宣布稳定后恢复特性分支规则；提交信息使用中文 Conventional Commits 和 AI trailers。
 9. 项目源码统一使用绝对导入（`serialforge...`）；禁止包内相对导入。FakeBackend、FakeTransport、SimulatedDevice 等测试替身只放 `tests/support/`，不得放进 `src/serialforge/` 或发布 wheel。
 
 ## 4. 工作约定

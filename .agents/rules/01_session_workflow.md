@@ -33,9 +33,10 @@
 
 ## 2. 动代码之前的检查清单
 
-- [ ] `git branch --show-current` → 快速迭代阶段应直接在 `dev` 上工作；稳定阶段才从 `dev` 拉自己的
-      `feat/<name>` / `fix/<name>` 分支（见 `05_git_and_commits.md` §1）。
-      **绝不在 `master` / `main` 上直接动手**，不自动切主干、不自动 stash
+- [ ] `git branch --show-current` → 应位于 `dev`（开发分支，不保证稳定可用）；快速迭代阶段直接在
+      `dev` 上工作，稳定阶段才从 `dev` 拉自己的 `feat/<name>` / `fix/<name>` 分支
+      （见 `05_git_and_commits.md` 分支一节）。
+      **绝不在 `master`（主分支，必须始终包含完整可用代码）上直接动手**，不自动切主干、不自动 stash
 - [ ] `git status` → 工作区是否干净，是否有别人（别的会话）在途的改动；
       要同时跑多个会话就用 `git worktree` 做物理隔离（见 `05` §9）
 - [ ] 判断任务规模 → 决定是否需要 checkpoint / todo（见下）
