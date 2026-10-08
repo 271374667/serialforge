@@ -9,6 +9,7 @@
 ## 提交
 
 - 每个提交是可独立回退的功能或文档单元；提交前检查 `git status --short`、`git diff --check` 和 `git diff --stat`。
+- 长任务完成一个可验证单元并通过相关检查后立即提交到 dev，不积累多个已验证单元等待整个里程碑结束；未完成部分留在工作区并写 checkpoint，用户原有改动不混入提交。
 - 标题使用中文 Conventional Commits：`feat(scope): 描述`。正文之后可加入 `AI-Used-For` 与 `AI-Prompt` trailer；不写 AI 签名或 `Co-authored-by`。
 - 钩子不运行测试、ruff 或 ty；大任务收尾由 AI 主动运行检查，中间 checkpoint 提交不自动触发检查。
 

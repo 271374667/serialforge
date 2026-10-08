@@ -1,7 +1,7 @@
 # 0008_M7-handoff
 
 > 关联任务: todo/0007_M7_集成演示与发布前验收.md | 更新: 2026-10-08 | 进度: M7 开发与验证进行中
-> 最近 commit: 01be615（本次迁移提交后以 git log 为准）
+> 最近 commit: 84fa007（结构迁移已提交；M7 Demo/验收工具在本次提交）
 
 ## 已完成
 
@@ -11,15 +11,14 @@
 - wheel/sdist 使用明确内容边界，构建和 twine check 通过，产物成员没有 tests/testing/examples。
 - API 快照扩展为公开方法签名、信号、属性、枚举值和数据类字段。
 - 修复生产线程导入仅属开发依赖的 typing_extensions；保留 Python 3.11 的逐方法 ty 说明。
-- 工作区 M7 Demo/README、硬件套件、CI 和 release.py 正在实现验证，尚不表示 M7 总体验收完成。
+- M7 Demo/README、硬件套件、CI 和 release.py 已实现；默认发布和非交互上传安全回归通过。
+- 干净 wheel 导入、Demo（spec identity 保持）及外置测试已通过：97 通过、1 硬件跳过。
 - 当前全量测试 97 通过、1 硬件跳过；Ruff/ty 通过，Pylint 10.00。
 
 ## 进行中（下一步从这里继续）
 
-- 先提交已验证的结构迁移到 dev，明确排除用户既有 main.py 删除。
-- scripts/ci.py 干净 wheel 的来源断言误把 uv 的 --with 依赖层要求放在 sys.prefix 下；
-  wheel 已能导入，但该断言需要按包元数据位置修正，再继续 Demo、测试、3.11–3.14 与最低依赖。
-- 继续补齐 M7 CI/发布文档验证结果，分独立单元及时提交；不 push、tag、上传。
+- M7 Demo/README 与验收工具构成独立提交；接着运行 ci.py --release 的矩阵及最低依赖。
+- 发布脚本入口保持干净工作区要求；用户既有 main.py 删除不自动处理，dry-run 逻辑由测试验证。
 
 ## 待办
 
@@ -38,5 +37,5 @@
 
 ## 验证方式
 
-- uv run python scripts/ci.py --release（仍在修正 wheel 验收阶段，不宣称全绿）。
+- uv run python scripts/ci.py --release（矩阵与最低依赖仍待实际执行，不宣称全绿）。
 - 架构守卫/API 快照；产物 ZIP/TAR 清单；taskmgr.py check / newdoc.py check。

@@ -1,7 +1,7 @@
 # serialforge · 架构总览
 
 > 类型: 活文档（原地更新，不编号、不归档）  |  最后更新: 2026-10-08
-> 基线 commit: 01be615（M7 修改在本次提交中；验证范围见 checkpoint）  |  适用版本: 0.0.1
+> 基线 commit: 84fa007（绝对导入与测试替身隔离；本次补充 M7 交付工具）  |  适用版本: 0.0.1
 > 形态: 完整  |  维护: AI 更新（见 `.agents/rules/15_architecture_doc.md`）
 > 读法: 第 1、2、3、6 节为必读区（每次会话读，合计 ≤150 行）；其余按需读
 
@@ -33,6 +33,7 @@
 | `src/serialforge/diagnostics/` | 流量与文件日志 | `traffic_logger.py:TrafficLogger`、`log_file_manager.py:LogFileManager` | 内部诊断组件 | L0-L1 | connection |
 | `tests/support/` | 可脚本化假后端与模拟设备 | `__init__.py`：本地测试替身 | 测试内部导入 | L0-L1 | tests/、examples/ |
 | `tests/` | 契约、守卫、单元和 API 快照 | `test_*.py` | 本地验证 | src | CI |
+| `examples/`、`scripts/`、`docs/` | 外置 Demo、本地 CI 与发布/真机验收说明 | `demo.py`、`ci.py`、`release.py` | 开发与维护者工具，不发布测试替身 | 源码或安装的 wheel、tests/support | 使用方/本地验收 |
 
 ## 4. 交互关系（按需）
 
@@ -44,15 +45,15 @@
 
 - 外部 I/O：M2 起由 pyserial 访问串口；QtCore 负责线程与信号；loguru 在 M3 接入。
 - 配置：人写的工具配置保留根目录 `pyproject.toml`；运行时日志、缓存和状态按项目规则进入 `data/` 或用户目录。
-- 本地 CI：`scripts/ci.py` 已执行单解释器检查、测试与构建；Python 3.11–3.14 矩阵、最低依赖和干净环境安装 wheel 尚未验证，`--matrix` / `--smoke` / `--release` 仍需补齐设计要求。
-- 发布：`uv build` 产出构建物；严禁在本项目中执行 PyPI 上传。
+- 本地 CI：默认全量检查、独立 Python 3.11–3.14 矩阵、构建/twine 与外置 wheel 验收；`--fast` 单版本，`--lowest` 临时副本解析最低依赖，`--smoke` 验收已构建 wheel，`--release` 覆盖全部。实际验证结果见当前 checkpoint，uv.lock 必须保持不变。
+- 发布：构建物统一进入 `outputs/01_dist/`；scripts/release.py 默认 dry-run，先要求干净工作区并执行发布前 CI。维护者上传要求显式参数和交互确认，AI 不执行上传、push 或 tag。
 
 ## 6. 关键不变量（必读，最容易改错的地方）
 
 - 顶层 `__all__` 恰为设计文档的 15 个名字 —— **违反**：破坏公共 API 预算和快照 —— **生效范围**：`src/serialforge/__init__.py`。
 - `CommandSpec` / `EventSpec` 是 `frozen=True, eq=False` 且全链路保留同一对象 —— **违反**：`result.spec is X` 失效 —— **生效范围**：models、registry、dispatcher、Qt 信号。
 - 发送终止符与接收定界相互独立；无结束符回复使用显式正数 `silence_gap_s` 的 `SILENCE_GAP`，接收循环须在无新字节时周期性 `flush()` —— **违反**：半包误判或命令永不完成 —— **生效范围**：advanced、transport、M5 connection、M6 discovery。
-- 定义层不导入实现子包，跨子包只经 `__init__.py` —— **违反**：循环依赖和架构守卫失败 —— **生效范围**：`src/serialforge/`。
+- 定义层不导入实现子包，跨子包优先经 `__init__.py`；既有 connection_worker 重连身份解析直接使用 discovery.port_scanner 是当前例外 —— **违反**：循环依赖和架构守卫失败 —— **生效范围**：`src/serialforge/`。
 - 库内只使用 loguru DEBUG 且默认静默 —— **违反**：宿主应用收到意外输出或等级 —— **生效范围**：diagnostics 与 connection。
 - 不在源码定义业务 `CommandSpec` / `EventSpec` —— **违反**：库无法复用于不同设备 —— **生效范围**：`src/serialforge/`。
 - Qt 依赖限于 QtCore，导入无线程、文件、串口和应用初始化副作用 —— **违反**：无界面导入环境被污染 —— **生效范围**：顶层导入与所有定义层模块。
@@ -73,6 +74,7 @@
 
 | 日期 | commit | 改了什么 |
 | --- | --- | --- |
+| 2026-10-08 | 本次提交 | 补齐外置 Demo/README、独立 CI 和 release dry-run；干净 wheel 导入、Demo 及测试通过 |
 | 2026-10-08 | 本次提交 | 统一绝对导入，将测试替身移至 tests/support，并禁止测试内容进入 wheel/sdist |
 | 2026-10-08 | 4d253a0 | 交接核对交付边界：Demo、完整文档、Python 矩阵和干净 wheel 环境仍待 M7 |
 | 2026-10-08 | e8c73ca | M5 连接工作线程、自动重连、心跳与日志会话；M6 扫描、波特率探测、缓存、取消和 COM11 真机验证完成 |
