@@ -4,8 +4,10 @@ import ast
 import importlib
 from pathlib import Path
 
+import serialforge
+
 ROOT = Path(__file__).parents[1]
-SRC = ROOT / "src" / "serialforge"
+SRC = Path(serialforge.__file__).parent
 TOP_LEVEL_API = {
     "SerialHandler",
     "DeviceFinder",
@@ -112,7 +114,6 @@ def test_dependency_layers_and_cross_package_imports_are_one_way() -> None:
         "transport": 1,
         "diagnostics": 1,
         "discovery": 2,
-        "testing": 2,
         "connection": 3,
     }
     for path in _python_files():
@@ -128,6 +129,33 @@ def test_dependency_layers_and_cross_package_imports_are_one_way() -> None:
             )
             if target is not None:
                 assert layer[target] <= layer[package], (path, node.module)
+
+
+def test_source_uses_absolute_project_imports() -> None:
+    """Keep production modules independent of package-relative imports."""
+    files = _python_files() + sorted((ROOT / "tests").rglob("*.py"))
+    files += sorted((ROOT / "examples").rglob("*.py"))
+    files += sorted((ROOT / "scripts").rglob("*.py"))
+    for path in files:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                assert node.level == 0, (path, node.module)
+
+
+def test_fake_backend_is_not_in_the_production_package() -> None:
+    """Keep test substitutes out of the wheel's ``serialforge`` package."""
+    assert not (SRC / "testing").exists()
+    assert (ROOT / "tests" / "support").exists()
+    for path in _python_files():
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                assert not (node.module or "").startswith("tests"), path
+            if isinstance(node, ast.Import):
+                assert all(
+                    not alias.name.startswith("tests") for alias in node.names
+                ), path
 
 
 def test_forbidden_imports_are_absent() -> None:

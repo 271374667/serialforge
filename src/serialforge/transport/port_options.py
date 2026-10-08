@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from ..advanced import SerialConfig
-from ..enums import FlowControl
+from serialforge.advanced import SerialConfig
+from serialforge.enums import FlowControl
 
 # This utility intentionally exposes one static conversion operation.
 # pylint: disable=too-few-public-methods

@@ -1,5 +1,5 @@
 """Connection facade exports."""
 
-from .serial_handler import SerialHandler
+from serialforge.connection.serial_handler import SerialHandler
 
 __all__ = ["SerialHandler"]

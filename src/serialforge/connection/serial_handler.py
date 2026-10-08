@@ -12,11 +12,13 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import QCoreApplication, QObject, Qt, QThread, Signal
 
 # pylint: enable=no-name-in-module
-from ..advanced import CommandPriority, CommandTicket, HandlerStats
-from ..diagnostics import TrafficLogger
-from ..enums import CommandStatus, ConnectionState, SendRoute
-from ..errors import CommandError, SerialForgeError
-from ..models import (
+from serialforge.advanced import CommandPriority, CommandTicket, HandlerStats
+from serialforge.connection.command_registry import CommandRegistry
+from serialforge.connection.connection_worker import ConnectionWorker
+from serialforge.diagnostics import TrafficLogger
+from serialforge.enums import CommandStatus, ConnectionState, SendRoute
+from serialforge.errors import CommandError, SerialForgeError
+from serialforge.models import (
     CommandResult,
     CommandSpec,
     DeviceInfo,
@@ -24,18 +26,36 @@ from ..models import (
     EventSpec,
     LogConfig,
 )
-from .command_registry import CommandRegistry
-from .connection_worker import ConnectionWorker
 
 # The facade owns the complete lifecycle state for one serial connection.
 # pylint: disable=too-many-instance-attributes
 
 if TYPE_CHECKING:
-    from .command_dispatcher import CommandDispatcher
+    from serialforge.connection.command_dispatcher import CommandDispatcher
 
 
 class SerialHandler(QObject):
-    """Coordinate one connection, its command registry, and Qt signals."""
+    """Coordinate one device connection, commands and QtCore signals.
+
+    Create and retain the handler in the application's Qt thread. Use QObject
+    slots in that thread for queued delivery; keep its event loop running.
+    ``send`` accepts calls from any thread. Connection methods belong to the
+    owner thread. Declarations and results retain the original spec identity.
+
+    Attributes:
+        connection_state_changed: Emit the new ConnectionState.
+        command_finished: Emit one CommandResult per accepted ticket.
+        event_received: Emit a DeviceEvent for push, stream or unknown frames.
+        traffic_logged: Emit a TrafficRecord when logging is enabled.
+        error_occurred: Emit a SerialForgeError for asynchronous failures.
+
+    Example:
+        With a QCoreApplication and application-owned declarations already
+        created, register before sending: ``handler.register(spec)``;
+        ``handler.connect()``; after CONNECTED, ``handler.send(spec)``.
+        In the completion slot, check ``result.spec is spec`` and ``result.ok``.
+        See ``examples/demo.py`` for an executable no-hardware application.
+    """
 
     connection_state_changed = Signal(ConnectionState)
     command_finished = Signal(object)
@@ -50,7 +70,16 @@ class SerialHandler(QObject):
         log: LogConfig | None = None,
         allow_raw_text: bool = True,
     ) -> None:
-        """Create a disconnected handler with no open serial resources."""
+        """Create a disconnected handler with no open serial resources.
+
+        Args:
+            profile: Device filtering, probing, framing and connection policy.
+            log: Optional logging policy; omitted means silent logging.
+            allow_raw_text: Allow unmatched text sends when True (default).
+
+        Raises:
+            SerialForgeError: No QCoreApplication has been created.
+        """
         application = QCoreApplication.instance()
         if application is None:
             raise SerialForgeError("SerialHandler requires a QCoreApplication")
@@ -73,7 +102,7 @@ class SerialHandler(QObject):
         self._registry: CommandRegistry = CommandRegistry(profile.terminator)
         # Keep the top-level package import free of advanced implementation.
         # pylint: disable=import-outside-toplevel
-        from .command_dispatcher import CommandDispatcher
+        from serialforge.connection.command_dispatcher import CommandDispatcher
 
         self._dispatcher: CommandDispatcher = CommandDispatcher(
             profile, self._registry, self._write
@@ -109,7 +138,16 @@ class SerialHandler(QObject):
     # ty: ignore[invalid-method-override, missing-override-decorator] --
     # QObject has an unrelated C++ signal-connect overload with the same name.
     def connect(self, target: str | DeviceInfo | None = None) -> None:
-        """Start an asynchronous connection to a device or matching profile."""
+        """Start discovery or a direct connection, returning immediately.
+
+        Args:
+            target: None discovers matching VID/PID devices; a port name skips
+                VID/PID filtering but probes its baudrate. DeviceInfo with a
+                known baudrate opens directly. States and errors use signals.
+
+        Raises:
+            SerialForgeError: A connection or earlier worker is still active.
+        """
         with self._state_lock:
             if self._state not in {
                 ConnectionState.DISCONNECTED,
@@ -135,7 +173,14 @@ class SerialHandler(QObject):
     # ty: ignore[invalid-method-override, missing-override-decorator] --
     # This public facade method intentionally shadows QObject.disconnect().
     def disconnect(self) -> None:
-        """Stop the connection and join its I/O threads idempotently."""
+        """Stop and join I/O threads; repeated calls have no additional effect.
+
+        Pending commands complete as CANCELLED. Explicit disconnection ends
+        the log session and stops automatic reconnect attempts.
+
+        Raises:
+            SerialForgeError: The worker cannot stop within five seconds.
+        """
         worker = self._worker
         if worker is not None:
             worker.request_stop()
@@ -183,15 +228,34 @@ class SerialHandler(QObject):
         self._traffic.record_tx(port or "-", data, route, spec)
 
     def register(self, *specs: CommandSpec | EventSpec) -> None:
-        """Register command and event declarations by object identity."""
+        """Register original declarations before sends and event matching.
+
+        Args:
+            specs: Frozen CommandSpec or EventSpec objects retained by identity.
+
+        Raises:
+            CommandError: Normalized requests or event patterns conflict.
+        """
         self._registry.register(*specs)
 
     def unregister(self, spec: CommandSpec | EventSpec) -> None:
-        """Remove a declaration from future sends and event matches."""
+        """Remove a declaration from future sends and event matches.
+
+        Args:
+            spec: The exact registered object; existing invocations retain it.
+        """
         self._registry.unregister(spec)
 
     def set_init_sequence(self, items: list[CommandSpec | str]) -> None:
-        """Validate and retain steps for M5 connection initialization."""
+        """Set the ordered commands run before CONNECTED and after reconnect.
+
+        Args:
+            items: Registered specs without placeholders or registered command
+                text with parameters already rendered. An empty list clears it.
+
+        Raises:
+            CommandError: A step is unregistered or requires missing parameters.
+        """
         for item in items:
             if isinstance(item, CommandSpec):
                 if not self._registry.contains(item):
@@ -222,7 +286,22 @@ class SerialHandler(QObject):
         priority: CommandPriority | None = None,
         **params: object,
     ) -> CommandTicket:
-        """Queue a registered command or safe raw text without blocking."""
+        """Queue a registered command or safe raw text without blocking.
+
+        Args:
+            target: Registered spec or text matched against the registry.
+            priority: Optional queue priority; None uses NORMAL.
+            **params: Values for named request placeholders; text accepts none.
+
+        Returns:
+            A ticket carrying request_id, original spec and routing information.
+            Completion arrives on command_finished, including DISCONNECTED or
+            BUSY when a send cannot be accepted for transmission.
+
+        Raises:
+            CommandError: Spec is unregistered, parameters contain control
+                characters, or unmatched text is disabled.
+        """
         if priority is None:
             priority = CommandPriority.NORMAL
         return self._dispatcher.submit(
@@ -235,7 +314,19 @@ class SerialHandler(QObject):
     def send_and_wait(
         self, target: CommandSpec | str, /, *, timeout: float, **params: object
     ) -> CommandResult:
-        """Wait in a script thread that has no running Qt event loop."""
+        """Wait in a script thread that has no running Qt event loop.
+
+        Args:
+            target: Registered spec or text with the same semantics as send.
+            timeout: Maximum wait in seconds; must be positive.
+            **params: Named request values accepted by send.
+
+        Returns:
+            The terminal CommandResult, including TIMEOUT if the wait expires.
+
+        Raises:
+            CommandError: Called in a running Qt event loop or send is invalid.
+        """
         if QThread.currentThread().loopLevel() > 0:
             raise CommandError("send_and_wait cannot run in a Qt event loop")
         if timeout <= 0:
@@ -272,12 +363,20 @@ class SerialHandler(QObject):
             self.command_finished.disconnect(on_finished)
 
     def set_log_config(self, config: LogConfig) -> None:
-        """Apply log switches and retain file policy for this session."""
+        """Apply logging switches during the connection's current session.
+
+        Args:
+            config: New logging policy. Disabling output does not add a sink.
+        """
         self._log = config
         self._traffic.set_log_config(config)
 
     def stats(self) -> HandlerStats:
-        """Return latency, event, and file traffic drop counters."""
+        """Return an immutable snapshot of latency and drop counters.
+
+        Returns:
+            HandlerStats; unobserved latency estimates remain None.
+        """
         return replace(
             self._dispatcher.stats(),
             dropped_traffic_lines=self._traffic.dropped_traffic_lines,

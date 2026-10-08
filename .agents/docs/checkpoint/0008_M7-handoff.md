@@ -1,58 +1,42 @@
 # 0008_M7-handoff
 
-> 关联任务: todo/0007_M7_集成演示与发布前验收.md  |  更新: 2026-10-08  |  进度: M1–M6 已交付，M7 未开始
-> 最近 commit: 4d253a0（交接前 HEAD；交接文档提交见 `git log -1`）
-
-## 背景与目标
-
-用户要求确认全部分支合入 `dev`、只保留 `dev`，保存各阶段进度并转到新对话开发。本轮仅执行分支清理和文档交接。
+> 关联任务: todo/0007_M7_集成演示与发布前验收.md | 更新: 2026-10-08 | 进度: M7 开发与验证进行中
+> 最近 commit: 01be615（本次迁移提交后以 git log 为准）
 
 ## 已完成
 
-| 阶段 | 已交付范围 | 关键 commit |
-| --- | --- | --- |
-| M1 | 包骨架、定义层、API/架构守卫、工具链与规范 | `98ba269` |
-| M2 | 传输、定界、校验、延迟、租约与假后端 | `40ab7e7` |
-| M3 | 流量记录、日志文件管理、默认静默 | `1716749` |
-| M4 | 注册表、响应解析、调度、背压、静默定界 | `222044c`、`393c7b9`、`526ac6f` |
-| M5 | 连接工作线程、读循环、初始化、心跳与重连 | `e8c73ca` |
-| M6 | 扫描、探测、缓存、异步取消、COM11 发现 | `e8c73ca` |
-| M7 | 尚未实施；任务已登记用于新会话恢复 | - |
-
-- `8bcb650` 合并既有分支历史；`d13b7e0` 固化快速迭代时直接在 `dev` 开发；`4d253a0` 归档 M5/M6 并同步架构。
-- 删除前逐一执行 `git merge-base --is-ancestor <分支> dev`，4 个分支均通过；随后用 `git branch -d` 删除，只剩 `dev`。
-- 已删分支及末端：`feat/m1-foundation` → `a24e8ab`；`feat/m3-diagnostics` → `a48a66e`；`feat/m4-dispatcher` 和 `feat/m5-m6-lifecycle-discovery` → `9b80efb`。提交均仍可从 `dev` 到达，必要时可据哈希重新创建分支。
-- 上轮 `uv run python scripts/ci.py` 通过：全仓 88 项测试、Ruff 格式检查、ty、Pylint 10.00、wheel/sdist 构建和 twine check；本轮没有修改代码或重新跑全量 CI。
-- M6 真机：COM11，VID/PID `067B:23A3`，115200；发送 `Version\r\n`，静默间隔 0.08 秒后匹配无结束符回复 `Software version 1.02`，耗时约 0.313 秒；版本号不写死。
-- M1–M6 的历史任务与 checkpoint 已归档；当前 checkpoint 目录只有本交接快照。
+- M1–M6 不重做；阶段记录已归档，原始真机记录仅 COM11/Prolific 的 Version 查询及发现。
+- 用户修订：全项目绝对导入，测试替身由 src/serialforge/testing 移至 tests/support。
+- 已同步 AGENTS、编码/打包规则、设计修订与架构；Ruff TID252 与 AST 守卫防止相对导入回归。
+- wheel/sdist 使用明确内容边界，构建和 twine check 通过，产物成员没有 tests/testing/examples。
+- API 快照扩展为公开方法签名、信号、属性、枚举值和数据类字段。
+- 修复生产线程导入仅属开发依赖的 typing_extensions；保留 Python 3.11 的逐方法 ty 说明。
+- 工作区 M7 Demo/README、硬件套件、CI 和 release.py 正在实现验证，尚不表示 M7 总体验收完成。
+- 当前全量测试 97 通过、1 硬件跳过；Ruff/ty 通过，Pylint 10.00。
 
 ## 进行中（下一步从这里继续）
 
-- 当前分支为 `dev`；本轮停止开发，M7 在新对话开始。先读取关联任务并确认最新用户指令，再按设计第 14 节推进。
-- 先检查 `git status --short --branch`；唯一既有未提交状态应为 ` D main.py`。不回滚、不自动提交该删除，也不自动 stash。
-- 对照设计文档第 3、12.4、13、14、15 节核对 M7 契约；从 `scripts/ci.py`、`README.md`、`tests/test_api_snapshot.py` 和现有测试确定缺失项，随后补充 `examples/` 与 `docs/` 交付内容。
+- 先提交已验证的结构迁移到 dev，明确排除用户既有 main.py 删除。
+- scripts/ci.py 干净 wheel 的来源断言误把 uv 的 --with 依赖层要求放在 sys.prefix 下；
+  wheel 已能导入，但该断言需要按包元数据位置修正，再继续 Demo、测试、3.11–3.14 与最低依赖。
+- 继续补齐 M7 CI/发布文档验证结果，分独立单元及时提交；不 push、tag、上传。
 
 ## 待办
 
-- M7 的 Demo、使用文档、docstring、CHANGELOG、API 快照、发布前流程及默认跳过的硬件套件。
-- Python 3.11–3.14 矩阵、最低直接依赖、干净环境安装 wheel 与运行 Demo。
-- Windows 10/11 多机器、至少两种芯片、DTR/RTS、拔插重连、睡眠唤醒和 TX-RX 回环矩阵。
+- 实际完成干净 wheel Demo/测试、Python 矩阵与 lowest-direct，验证仓库 uv.lock 无改动。
+- M7 阶段报告与内部文档检查；Windows 10/第二种芯片/拔插/睡眠/DTR-RTS/回环保留未验证。
+- 用户没有授权新的真机命令或接线，不自动打开 COM11 或其他真实端口。
 
-## 关键决策与上下文（恢复任务必读）
+## 关键上下文
 
-- 直接在 `dev` 开发和提交，直到用户宣布稳定；其他规范以 `AGENTS.md` 与规则索引为准。
-- 只使用 QtCore、uv；禁止 PyPI 上传、未授权 push、tag、强制改写历史和云端 CI。
-- 无结束符接收与发送 CRLF 独立；周期性 `flush()`、动态版本匹配和原始 spec 对象身份必须保留。
-- 默认无硬件测试；COM11 的历史授权仅涉及 `Version` 查询，不代表拔插、复位或其他命令已获授权。
-- 用户级规范脚手架含冲突标记，不执行；当前本地规范工具可用。
-
-## 未验证事项与风险
-
-- 88 项测试是全仓总数，不是 M5/M6 定向测试数；阶段完成记录不代表设计所有组合已经验证。
-- `scripts/ci.py --matrix` 只打印提示；`--smoke` 仅在项目环境导入；`--release` 未实现完整发布前流程。现有 CI 通过不证明矩阵、最低依赖或干净 wheel 安装通过。
-- 真机验证限于当前 COM11 的查询与扫描；其余硬件矩阵保持未验证。
+- 保留 main.py 的未提交删除；不得自动提交、回滚或 stash。
+- 原 src/serialforge/testing 仅剩旧 __pycache__；删除命令被环境策略阻止，已可回退地移至
+  temp/0003_testing_bytecode，生产目录已不存在。测试替身和示例不进入 wheel/sdist。
+- 测试与 Demo 改用 tests.support；wheel 冒烟仅复制外置验收输入，不复制 src。
+- 计时已实测 Windows 11 build 26200 / Python 3.11.12 x64：1 ms sleep 的中位 1.528 ms，
+  5 ms 的中位 5.501 ms；仅证明本机名义 5 ms 无 15.6 ms 固定下限，不证明硬件时序。
 
 ## 验证方式
 
-- 本轮：分支可达性检查、`git diff --check`、`uv run python .agents/tools/taskmgr.py check` 与 `uv run python .agents/tools/newdoc.py check`。
-- 后续开发：按变更范围跑定向测试；M7 收尾完成实际矩阵、安装包验证和阶段 CI，如实记录不可验证项。
+- uv run python scripts/ci.py --release（仍在修正 wheel 验收阶段，不宣称全绿）。
+- 架构守卫/API 快照；产物 ZIP/TAR 清单；taskmgr.py check / newdoc.py check。

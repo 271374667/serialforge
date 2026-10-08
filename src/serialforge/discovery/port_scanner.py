@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from ..models import DeviceInfo, DeviceProfile
-from ..protocols import PortBackend
-from ..transport import PortRegistry
+from serialforge.models import DeviceInfo, DeviceProfile
+from serialforge.protocols import PortBackend
+from serialforge.transport import PortRegistry
 
 # The scanner is a small stateless adapter with one public operation.
 # pylint: disable=too-few-public-methods

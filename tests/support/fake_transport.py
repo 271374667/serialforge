@@ -6,7 +6,7 @@ import time
 from collections import deque
 from threading import Condition
 
-from .simulated_device import SimulatedDevice
+from tests.support.simulated_device import SimulatedDevice
 
 # The fake handle mirrors the real transport's independent control state.
 # pylint: disable=too-many-instance-attributes

@@ -4,18 +4,16 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from typing_extensions import override
-
 # pylint: disable=no-name-in-module
 from PySide6.QtCore import QThread
 
-from ..enums import ScanMode
+from serialforge.enums import ScanMode
 
 # A single-purpose Qt worker intentionally exposes only ``run``.
 # pylint: disable=too-few-public-methods
 
 if TYPE_CHECKING:
-    from .device_finder import DeviceFinder
+    from serialforge.discovery.device_finder import DeviceFinder
 
 
 class AsyncScanThread(QThread):
@@ -30,7 +28,8 @@ class AsyncScanThread(QThread):
         self._mode: ScanMode = mode
         self._port: str | None = port
 
-    @override
+    # ty: ignore[missing-override-decorator] -- Python 3.11 has no typing.override;
+    # do not require a development-only backport to run the installed library.
     def run(self) -> None:
         """Execute and publish the scan result."""
         self._finder.run_find(self._mode, self._port)

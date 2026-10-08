@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ..advanced import HandlerStats, ReadLoopConfig
+from serialforge.advanced import HandlerStats, ReadLoopConfig
 
 
 class LatencyTracker:

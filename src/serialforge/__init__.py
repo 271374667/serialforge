@@ -17,17 +17,17 @@ try:
 except PackageNotFoundError:
     __version__ = "0.0.1"
 
-from .connection import SerialHandler
-from .discovery import DeviceFinder
-from .enums import (
+from serialforge.connection import SerialHandler
+from serialforge.discovery import DeviceFinder
+from serialforge.enums import (
     CommandStatus,
     ConnectionState,
     Correlation,
     ResponseMode,
     ScanMode,
 )
-from .errors import SerialForgeError
-from .models import (
+from serialforge.errors import SerialForgeError
+from serialforge.models import (
     CommandResult,
     CommandSpec,
     DeviceEvent,

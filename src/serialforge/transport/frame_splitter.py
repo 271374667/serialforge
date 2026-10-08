@@ -5,9 +5,9 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 
-from ..advanced import FramingConfig
-from ..enums import FramingMode
-from ..errors import FramingError
+from serialforge.advanced import FramingConfig
+from serialforge.enums import FramingMode
+from serialforge.errors import FramingError
 
 
 class FrameSplitter:

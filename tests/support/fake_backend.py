@@ -5,10 +5,10 @@ from __future__ import annotations
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 
-from ..protocols import TransportProtocol
-from ..transport import BackendSwitch, PortRegistry
-from .fake_transport import FakeTransport
-from .simulated_device import SimulatedDevice
+from serialforge.protocols import TransportProtocol
+from serialforge.transport import BackendSwitch, PortRegistry
+from tests.support.fake_transport import FakeTransport
+from tests.support.simulated_device import SimulatedDevice
 
 
 class FakeBackend:

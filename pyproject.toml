@@ -39,6 +39,11 @@ dev = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/serialforge"]
+exclude = ["**/__pycache__", "**/*.pyc", "src/serialforge/testing"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/serialforge", "pyproject.toml", "README.md", "LICENSE", "CHANGELOG.md"]
+exclude = ["**/__pycache__", "**/*.pyc", "src/serialforge/testing"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -53,14 +58,17 @@ line-length = 80
 exclude = [".agents", "temp", "outputs"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B"]
+select = ["E", "F", "I", "UP", "B", "TID252"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
 
 [tool.ty.environment]
 python-version = "3.11"
 python-platform = "win32"
 
 [tool.ty.src]
-exclude = [".agents", ".venv", "dist", "build", "temp"]
+exclude = [".agents", ".venv", ".venv-*", "dist", "build", "temp", "outputs"]
 
 [tool.ty.rules]
 all = "error"

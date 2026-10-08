@@ -7,13 +7,13 @@ import pytest
 from serialforge.advanced import FramingConfig, ReadLoopConfig
 from serialforge.enums import Checksum, FramingMode
 from serialforge.errors import ConfigError, FramingError, PortBusyError
-from serialforge.testing import FakeBackend, SimulatedDevice, use_fake_backend
 from serialforge.transport import (
     ChecksumCalculator,
     FrameSplitter,
     LatencyTracker,
     PortRegistry,
 )
+from tests.support import FakeBackend, SimulatedDevice, use_fake_backend
 
 
 def test_line_splitter_handles_half_and_sticky_frames() -> None:

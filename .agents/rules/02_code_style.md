@@ -178,10 +178,13 @@ def fetch_page(url: str, *, timeout: float = 10.0, retry: int = 3) -> str:
 
 - 每个模块一个清晰职责，文件超过 ~500 行考虑拆分，**3000 行是硬上限**（见 §2）。
 - 拆出的模块按职责暴露函数或类，不强制入口类。
-- **包导入**：src/<package>/ 布局从实际包名导入；包内相对导入遵循项目风格。
+- **包导入**：src/<package>/ 布局从实际包名绝对导入；包括类型检查块、延迟导入和 `__init__.py`，禁止相对导入。
 
 - import 顺序：标准库 → 第三方 → 本项目，三组之间空一行，**由 `ruff` 的 `I` 规则强制**
-  （存量项目遵循已有工具配置，见 `06_python_toolchain.md`）。
+  （存量项目遵循已有工具配置，见 `06_python_toolchain.md`）。项目源码统一使用绝对导入：
+  包内模块必须写 `from serialforge.<module> import ...`，禁止 `from .` / `from ..`；
+  测试替身使用 `tests.support.<module>`，也禁止相对导入。这样模块既能被独立工具分析，
+  也能在源码树和已安装 wheel 中保持相同的导入路径。
 - 常量集中在专门模块，不散落各处。
 - 不要提交注释掉的大段代码、调试代码、`TODO` 而不说明——要么清理，要么进 todo 文档。
 
@@ -191,7 +194,7 @@ def fetch_page(url: str, *, timeout: float = 10.0, retry: int = 3) -> str:
 - [ ] 函数和类按职责组织，没有仅为套类而增加的门面
 - [ ] 动态能力限定在必要的适配或测试边界，并有验证
 - [ ] 变量类型全程一致，所有属性在 `__init__` 或类体中声明并注解
-- [ ] import 使用真实包名，包内相对导入符合项目风格
+- [ ] import 使用真实包名且全部为绝对导入，测试替身位于 `tests/support/` 并排除发布包
 - [ ] 资源获取优先使用了 `with`；`return self` 的方法注解为 `typing.Self`
 - [ ] 所有公开的类/方法有 Google 风格 docstring
 - [ ] 没有 `print` 调试残留、没有注释掉的代码块

@@ -17,8 +17,8 @@ from serialforge.advanced import FramingConfig, RuntimeConfig, SerialConfig
 from serialforge.discovery import DeviceFinder
 from serialforge.discovery.baud_cache import BaudCache
 from serialforge.enums import FramingMode
-from serialforge.testing import FakeBackend, SimulatedDevice, use_fake_backend
 from serialforge.transport import PortRegistry
+from tests.support import FakeBackend, SimulatedDevice, use_fake_backend
 
 _APP: QCoreApplication | None = None
 VERSION = CommandSpec(

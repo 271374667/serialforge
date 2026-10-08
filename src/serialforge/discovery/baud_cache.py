@@ -13,8 +13,8 @@ from loguru import logger
 # pylint: disable=no-name-in-module
 from PySide6.QtCore import QStandardPaths
 
-from ..models import DeviceInfo
-from ..settings import LOG_ENABLED
+from serialforge.models import DeviceInfo
+from serialforge.settings import LOG_ENABLED
 
 
 class BaudCache:

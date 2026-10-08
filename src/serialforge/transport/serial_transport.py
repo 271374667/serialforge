@@ -8,7 +8,7 @@ from typing import Any, cast
 import serial
 from serial.tools import list_ports
 
-from ..protocols import TransportProtocol
+from serialforge.protocols import TransportProtocol
 
 
 class SerialTransport:

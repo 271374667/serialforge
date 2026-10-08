@@ -13,8 +13,11 @@ from typing import Any
 # pylint: disable=no-name-in-module
 from PySide6.QtCore import QObject, Signal
 
-from ..advanced import CommandTicket, HandlerStats, RuntimeConfig
-from ..enums import (
+from serialforge.advanced import CommandTicket, HandlerStats, RuntimeConfig
+from serialforge.connection.command_registry import CommandRegistry
+from serialforge.connection.pending_command import PendingCommand
+from serialforge.connection.response_parser import ResponseParser
+from serialforge.enums import (
     CommandPriority,
     CommandStatus,
     Correlation,
@@ -22,12 +25,14 @@ from ..enums import (
     SendRoute,
     TimeoutPolicy,
 )
-from ..errors import CommandError
-from ..models import CommandResult, CommandSpec, DeviceEvent, DeviceProfile
-from ..transport import LatencyTracker
-from .command_registry import CommandRegistry
-from .pending_command import PendingCommand
-from .response_parser import ResponseParser
+from serialforge.errors import CommandError
+from serialforge.models import (
+    CommandResult,
+    CommandSpec,
+    DeviceEvent,
+    DeviceProfile,
+)
+from serialforge.transport import LatencyTracker
 
 
 # One dispatcher owns the synchronized queue, in-flight state, and deadlines.

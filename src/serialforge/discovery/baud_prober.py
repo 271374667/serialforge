@@ -10,14 +10,14 @@ from dataclasses import replace
 
 from loguru import logger
 
-from ..advanced import FramingConfig, ProbeSpec, SerialConfig
-from ..enums import FramingMode
-from ..errors import FramingError, PortBusyError
-from ..models import CommandSpec, DeviceInfo, DeviceProfile
-from ..protocols import PortBackend, TransportProtocol
-from ..settings import LOG_ENABLED
-from ..transport import FrameSplitter, PortOptions, PortRegistry
-from .baud_cache import BaudCache
+from serialforge.advanced import FramingConfig, ProbeSpec, SerialConfig
+from serialforge.discovery.baud_cache import BaudCache
+from serialforge.enums import FramingMode
+from serialforge.errors import FramingError, PortBusyError
+from serialforge.models import CommandSpec, DeviceInfo, DeviceProfile
+from serialforge.protocols import PortBackend, TransportProtocol
+from serialforge.settings import LOG_ENABLED
+from serialforge.transport import FrameSplitter, PortOptions, PortRegistry
 
 # Probe state is deliberately kept together while each rate owns one handle.
 # pylint: disable=too-many-locals

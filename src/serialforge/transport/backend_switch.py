@@ -5,8 +5,8 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from ..protocols import PortBackend
-from .serial_transport import SerialTransport
+from serialforge.protocols import PortBackend
+from serialforge.transport.serial_transport import SerialTransport
 
 
 class BackendSwitch:

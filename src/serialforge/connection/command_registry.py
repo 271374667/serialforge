@@ -8,8 +8,8 @@ import threading
 from collections.abc import Mapping
 from types import MappingProxyType
 
-from ..errors import CommandError
-from ..models import CommandSpec, EventSpec
+from serialforge.errors import CommandError
+from serialforge.models import CommandSpec, EventSpec
 
 RegistrySnapshot = tuple[
     tuple[CommandSpec, ...],

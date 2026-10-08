@@ -6,8 +6,10 @@ import threading
 import time
 from concurrent.futures import (
     ThreadPoolExecutor,
-    TimeoutError as FutureTimeoutError,
     as_completed,
+)
+from concurrent.futures import (
+    TimeoutError as FutureTimeoutError,
 )
 
 from loguru import logger
@@ -15,30 +17,49 @@ from loguru import logger
 # pylint: disable=no-name-in-module
 from PySide6.QtCore import QCoreApplication, QObject, Signal
 
-from ..advanced import RuntimeConfig
-from ..enums import ScanMode
-from ..errors import ProbeError, SerialForgeError
-from ..models import DeviceInfo, DeviceProfile
-from ..protocols import PortBackend
-from ..settings import LOG_ENABLED
-from ..transport import BackendSwitch, SerialTransport
-from .async_scan_thread import AsyncScanThread
-from .baud_cache import BaudCache
-from .baud_prober import BaudProber
-from .port_scanner import PortScanner
+from serialforge.advanced import RuntimeConfig
+from serialforge.discovery.async_scan_thread import AsyncScanThread
+from serialforge.discovery.baud_cache import BaudCache
+from serialforge.discovery.baud_prober import BaudProber
+from serialforge.discovery.port_scanner import PortScanner
+from serialforge.enums import ScanMode
+from serialforge.errors import ProbeError, SerialForgeError
+from serialforge.models import DeviceInfo, DeviceProfile
+from serialforge.protocols import PortBackend
+from serialforge.settings import LOG_ENABLED
+from serialforge.transport import BackendSwitch, SerialTransport
 
 # The finder coordinates cache, cancellation, and Qt worker ownership.
 # pylint: disable=too-many-instance-attributes
 
 
 class DeviceFinder(QObject):
-    """Find matching serial devices and remember their working baudrates."""
+    """Find matching devices while remembering successful baudrates.
+
+    A QCoreApplication must exist before construction. Retain the finder until
+    async completion; connect QObject slots in the application thread.
+
+    Attributes:
+        probe_progress: Emit (port, baudrate) for each probe attempt.
+        probe_finished: Emit a list of DeviceInfo exactly once per scan.
+
+    Example:
+        For a blocking script use ``DeviceFinder(profile).find()``. In a Qt
+        application connect probe_finished before ``finder.find_async()``.
+    """
 
     probe_progress = Signal(str, int)
     probe_finished = Signal(object)
 
     def __init__(self, profile: DeviceProfile) -> None:
-        """Create a finder without enumerating or opening any port."""
+        """Create a finder without enumerating or opening any port.
+
+        Args:
+            profile: VID/PID filters, candidate baudrates and required probe.
+
+        Raises:
+            SerialForgeError: No QCoreApplication exists.
+        """
         application = QCoreApplication.instance()
         if application is None:
             raise SerialForgeError("DeviceFinder requires a QCoreApplication")
@@ -59,14 +80,33 @@ class DeviceFinder(QObject):
     def find(
         self, mode: ScanMode = ScanMode.ALL, *, port: str | None = None
     ) -> list[DeviceInfo]:
-        """Scan synchronously while keeping enumeration on a worker thread."""
+        """Block until discovery completes, leaving enumeration to a worker.
+
+        Args:
+            mode: ALL returns every match; FIRST_MATCH stops other probes.
+            port: Optional trusted port; bypasses VID/PID filtering.
+
+        Returns:
+            Matching devices with successful baudrates and probe responses.
+
+        Raises:
+            ProbeError: Another scan is already active on this finder.
+        """
         self._begin()
         return self.run_find(mode, port)
 
     def find_async(
         self, mode: ScanMode = ScanMode.ALL, *, port: str | None = None
     ) -> None:
-        """Start one background scan and publish its eventual result."""
+        """Return immediately and publish results through probe_finished.
+
+        Args:
+            mode: ALL or FIRST_MATCH completion policy.
+            port: Optional trusted port, bypassing VID/PID filtering.
+
+        Raises:
+            ProbeError: Another scan is already active on this finder.
+        """
         self._begin()
         thread = AsyncScanThread(self, mode, port)
         self._thread = thread
@@ -77,7 +117,7 @@ class DeviceFinder(QObject):
         thread.start()
 
     def cancel(self) -> None:
-        """Request cooperative cancellation of an active scan."""
+        """Request cooperative cancellation; completion still emits a list."""
         self._cancel.set()
 
     def _shutdown(self) -> None:
@@ -88,7 +128,11 @@ class DeviceFinder(QObject):
             thread.wait(5000)
 
     def forget(self, device: DeviceInfo) -> None:
-        """Discard one remembered baudrate hint."""
+        """Discard one remembered baudrate hint.
+
+        Args:
+            device: Identity whose cached baudrate should be forgotten.
+        """
         self._cache.forget(device)
 
     def _begin(self) -> None:
@@ -100,7 +144,15 @@ class DeviceFinder(QObject):
             self._cancel.clear()
 
     def run_find(self, mode: ScanMode, port: str | None) -> list[DeviceInfo]:
-        """Run the coordinator and publish exactly one completion signal."""
+        """Run the coordinator after a scan has been started internally.
+
+        Args:
+            mode: Completion policy passed by find or find_async.
+            port: Optional port restriction passed by the public scan method.
+
+        Returns:
+            Completed probe results; use find or find_async to start a scan.
+        """
         result: list[DeviceInfo] = []
         try:
             with ThreadPoolExecutor(max_workers=1) as coordinator:

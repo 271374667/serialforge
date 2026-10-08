@@ -1,7 +1,7 @@
 # serialforge · 架构总览
 
 > 类型: 活文档（原地更新，不编号、不归档）  |  最后更新: 2026-10-08
-> 基线 commit: 4d253a0（包含 M5/M6 实现及阶段记录；交付验证范围见下文）  |  适用版本: 0.0.1
+> 基线 commit: 01be615（M7 修改在本次提交中；验证范围见 checkpoint）  |  适用版本: 0.0.1
 > 形态: 完整  |  维护: AI 更新（见 `.agents/rules/15_architecture_doc.md`）
 > 读法: 第 1、2、3、6 节为必读区（每次会话读，合计 ≤150 行）；其余按需读
 
@@ -13,7 +13,7 @@
 
 ## 2. 外部形态（必读）
 
-- 交付物：可构建的 Python 库 `serialforge` 与本地 CI 脚本；无硬件 Demo 和完整使用文档待 M7 补齐。
+- 交付物：可构建的 Python 库 `serialforge` 与本地 CI 脚本；无硬件 Demo 放在 `examples/`，测试替身放在 `tests/support/`，不进入发布 wheel。
 - 运行方式：使用方 `from serialforge import ...`；业务命令运行时声明并注册；Qt 应用提供 `QCoreApplication` 事件循环。
 - 关键依赖：Python >=3.11；`PySide6-Essentials`（只用 QtCore）、`pyserial`、`loguru`；uv + hatchling 构建。
 
@@ -27,16 +27,16 @@
 | `src/serialforge/settings.py` | 默认配置常量 | 定义层 | 内部默认值 | 标准库 | 定义层与实现层 |
 | `src/serialforge/protocols.py` | 后端与传输协议 | 定义层 | 内部协议 | models | transport/discovery/connection |
 | `src/serialforge/advanced.py` | 进阶配置和统计再导出 | 再出口 | `advanced.__all__` | 定义层 | 使用方与实现层 |
-| `src/serialforge/transport/` | 字节流、定界、校验、延迟与端口后端 | `__init__.py`：M2 传输组件 | 内部模块 | L0 | discovery/connection/testing |
+| `src/serialforge/transport/` | 字节流、定界、校验、延迟与端口后端 | `__init__.py`：M2 传输组件 | 内部模块 | L0 | discovery/connection |
 | `src/serialforge/connection/` | 命令注册、响应解析、调度与连接生命周期 | `command_registry.py:CommandRegistry`、`command_dispatcher.py:CommandDispatcher`、`serial_handler.py:SerialHandler`、`connection_worker.py:ConnectionWorker` | 顶层门面与内部调度组件 | L0-L2 | `__init__.py` |
 | `src/serialforge/discovery/` | 端口扫描、波特率探测、缓存与异步发现 | `device_finder.py:DeviceFinder`、`port_scanner.py:PortScanner`、`baud_prober.py:BaudProber` | `DeviceFinder` | L0-L1 | connection/顶层 |
 | `src/serialforge/diagnostics/` | 流量与文件日志 | `traffic_logger.py:TrafficLogger`、`log_file_manager.py:LogFileManager` | 内部诊断组件 | L0-L1 | connection |
-| `src/serialforge/testing/` | 可脚本化假后端与模拟设备 | `__init__.py`：M2 假后端组件 | testing 命名空间 | L0-L1 | tests/使用方 |
+| `tests/support/` | 可脚本化假后端与模拟设备 | `__init__.py`：本地测试替身 | 测试内部导入 | L0-L1 | tests/、examples/ |
 | `tests/` | 契约、守卫、单元和 API 快照 | `test_*.py` | 本地验证 | src | CI |
 
 ## 4. 交互关系（按需）
 
-- 依赖单向：定义层 L0 → transport/diagnostics L1 → discovery/testing L2 → connection L3 → 顶层再导出 L4。
+- 依赖单向：定义层 L0 → transport/diagnostics L1 → discovery L2 → connection L3 → 顶层再导出 L4；`tests/support/` 只作为测试注入边界，不是发布层。
 - 典型路径：`SerialHandler.connect()` 通过 discovery 获取端口，再由 transport 读写；命令经 registry/dispatcher 匹配并以 Qt 信号发送结果。
 - M1 建立定义层、命名空间与契约测试；M2 只实现可替换传输层、帧/校验/延迟基础设施和无硬件测试后端，不提前实现 connection/discovery 门面。
 
@@ -56,6 +56,7 @@
 - 库内只使用 loguru DEBUG 且默认静默 —— **违反**：宿主应用收到意外输出或等级 —— **生效范围**：diagnostics 与 connection。
 - 不在源码定义业务 `CommandSpec` / `EventSpec` —— **违反**：库无法复用于不同设备 —— **生效范围**：`src/serialforge/`。
 - Qt 依赖限于 QtCore，导入无线程、文件、串口和应用初始化副作用 —— **违反**：无界面导入环境被污染 —— **生效范围**：顶层导入与所有定义层模块。
+- 项目包内一律使用绝对导入，测试替身只存在于 `tests/support/` —— **违反**：独立分析、源码运行与 wheel 安装的导入路径不一致，测试组件会被错误打包 —— **生效范围**：`src/serialforge/`、`tests/support/`、构建配置。
 - 已知坑：当前用户级 `scaffold.py` 有冲突标记；M1 规范目录由模板手动落地，需在交付记录中保留该事实。
 
 ## 7. 深潜入口（按需）
@@ -72,6 +73,7 @@
 
 | 日期 | commit | 改了什么 |
 | --- | --- | --- |
+| 2026-10-08 | 本次提交 | 统一绝对导入，将测试替身移至 tests/support，并禁止测试内容进入 wheel/sdist |
 | 2026-10-08 | 4d253a0 | 交接核对交付边界：Demo、完整文档、Python 矩阵和干净 wheel 环境仍待 M7 |
 | 2026-10-08 | e8c73ca | M5 连接工作线程、自动重连、心跳与日志会话；M6 扫描、波特率探测、缓存、取消和 COM11 真机验证完成 |
 | 2026-10-08 | 526ac6f | 明确支持无结束符回复的静默定界，校验间隔并覆盖分片和动态版本号 |

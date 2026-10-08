@@ -9,32 +9,35 @@ import time
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
-from typing_extensions import override
-
 # pylint: disable=no-name-in-module
 from PySide6.QtCore import Qt, QThread
 
-from ..advanced import FramingConfig, ProbeSpec, RuntimeConfig, SerialConfig
-from ..discovery import DeviceFinder
-from ..discovery.port_scanner import PortScanner
-from ..enums import (
+from serialforge.advanced import (
+    FramingConfig,
+    ProbeSpec,
+    RuntimeConfig,
+    SerialConfig,
+)
+from serialforge.connection.read_thread import ReadThread
+from serialforge.discovery import DeviceFinder
+from serialforge.discovery.port_scanner import PortScanner
+from serialforge.enums import (
     CommandPriority,
     CommandStatus,
     ConnectionState,
     FramingMode,
     ScanMode,
 )
-from ..errors import PortNotFoundError, SerialForgeError
-from ..models import CommandResult, CommandSpec, DeviceInfo
-from ..protocols import TransportProtocol
-from ..transport import BackendSwitch, PortOptions, PortRegistry
-from .read_thread import ReadThread
+from serialforge.errors import PortNotFoundError, SerialForgeError
+from serialforge.models import CommandResult, CommandSpec, DeviceInfo
+from serialforge.protocols import TransportProtocol
+from serialforge.transport import BackendSwitch, PortOptions, PortRegistry
 
 # The worker coordinates the facade's private state across Qt threads.
 # pylint: disable=protected-access,too-many-instance-attributes
 
 if TYPE_CHECKING:
-    from .serial_handler import SerialHandler
+    from serialforge.connection.serial_handler import SerialHandler
 
 
 class ConnectionWorker(QThread):
@@ -96,7 +99,8 @@ class ConnectionWorker(QThread):
         if transport is not None:
             transport.reset_input_buffer()
 
-    @override
+    # ty: ignore[missing-override-decorator] -- Python 3.11 has no typing.override;
+    # do not require a development-only backport to run the installed library.
     def run(self) -> None:
         """Open once, recover unexpected loss, and close every handle."""
         runtime = self._handler._profile.runtime
@@ -187,7 +191,8 @@ class ConnectionWorker(QThread):
             self._finder = None
         if not results:
             raise PortNotFoundError(
-                f"no matching serial device found on {target or 'available ports'}"
+                "no matching serial device found on "
+                f"{target or 'available ports'}"
             )
         return results[0]
 

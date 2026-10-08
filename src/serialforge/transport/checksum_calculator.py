@@ -5,7 +5,7 @@ from __future__ import annotations
 import binascii
 from collections.abc import Callable
 
-from ..enums import Checksum
+from serialforge.enums import Checksum
 
 
 class ChecksumCalculator:

@@ -12,7 +12,7 @@
 | 入口 | `src/serialforge/__init__.py`；开发脚本在 `scripts/` |
 | 构建 | `uv build` |
 | 测试 | `uv run pytest`；阶段 CI 为 `uv run python scripts/ci.py` |
-| 当前阶段 | M1→M6 阶段交付已完成；M7 已登记交接，开发留到新对话 |
+| 当前阶段 | M1→M6 已交付；M7 集成演示与发布前验收进行中，真机矩阵尚未完成 |
 | 架构总览 | `.agents/ARCHITECTURE.md`（第 1、2、3、6 节为每次必读区，≤150 行） |
 
 目录重点：`src/serialforge/` 是源码，`tests/` 是测试，`examples/` 放使用方命令示例，`.agents/` 放项目规范与交接文档；本 skill 不复制进项目技能目录。
@@ -43,6 +43,7 @@
 6. serialforge 源码不包含具体业务命令；业务命令只能在 `examples/` 与 `tests/` 声明。
 7. 库内日志只用 loguru DEBUG，默认静默；不得执行 PyPI 上传，不生成云端 CI。
 8. 未经用户明确许可不 `git push`；当前快速迭代阶段直接在 `dev` 开发和提交，不新建 `feat/*` / `fix/*` 分支，直到用户明确宣布稳定后恢复特性分支规则；提交信息使用中文 Conventional Commits 和 AI trailers。
+9. 项目源码统一使用绝对导入（`serialforge...`）；禁止包内相对导入。FakeBackend、FakeTransport、SimulatedDevice 等测试替身只放 `tests/support/`，不得放进 `src/serialforge/` 或发布 wheel。
 
 ## 4. 工作约定
 

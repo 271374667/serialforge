@@ -14,17 +14,17 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
-from .enums import (
+from serialforge.enums import (
     CommandStatus,
     Correlation,
     ResponseMode,
     SendRoute,
     TimeoutPolicy,
 )
-from .errors import CommandError, ConfigError
+from serialforge.errors import CommandError, ConfigError
 
 if TYPE_CHECKING:
-    from .advanced import FramingConfig, RuntimeConfig, SerialConfig
+    from serialforge.advanced import FramingConfig, RuntimeConfig, SerialConfig
 
 
 def _normalise_text(value: str) -> str:
@@ -116,6 +116,21 @@ class CommandSpec:
         request: Text written to the device, optionally containing placeholders.
         pattern: Regular expression used to parse response frames.
         result_type: Optional scalar or dataclass used for parsed data.
+        name: Optional display label; defaults to the normalized request.
+        mode: Explicit response policy, or inferred SINGLE/NO_REPLY/MULTI.
+        correlation: EXCLUSIVE serializes replies; TAGGED uses request fields.
+        count: Positive frame count terminating MULTI; excludes until.
+        until: Full-match MULTI end marker; excluded from parsed data.
+        error_pattern: Device error full-match pattern, producing DEVICE_ERROR.
+        timeout_s: Positive first-reply seconds or TimeoutPolicy.AUTO.
+        idle_timeout_s: Positive maximum silence between MULTI/STREAM frames.
+        total_timeout_s: Optional positive total seconds for the invocation.
+        idempotent: Permit configured safe retries after reconnect.
+        parser: Optional callable receiving the matched response text.
+
+    Note:
+        Frozen with identity equality: register and reuse this exact object.
+        See examples/demo.py for an executable declaration and send workflow.
 
     Raises:
         CommandError: If the declaration is inconsistent or invalid.
@@ -217,7 +232,16 @@ class CommandSpec:
 
 @dataclass(frozen=True, eq=False)
 class EventSpec:
-    """Declare a device-initiated event frame."""
+    """Declare a device-initiated event while preserving object identity.
+
+    Args:
+        pattern: Full-match expression, using named groups for parsed fields.
+        result_type: Optional scalar or dataclass for captured data.
+        name: Display label; defaults to the pattern, not used for routing.
+
+    Raises:
+        CommandError: Pattern or result mapping is invalid.
+    """
 
     pattern: str
     result_type: type[Any] | None = None
@@ -239,7 +263,7 @@ def _default_serial_config() -> Any:
     """Build the advanced default without importing it at module load time."""
     # Import lazily to keep the definition layer free of an import cycle.
     # pylint: disable=import-outside-toplevel
-    from .advanced import SerialConfig
+    from serialforge.advanced import SerialConfig
 
     return SerialConfig()
 
@@ -248,7 +272,7 @@ def _default_runtime_config() -> Any:
     """Build the advanced runtime default without a module cycle."""
     # Import lazily to keep the definition layer free of an import cycle.
     # pylint: disable=import-outside-toplevel
-    from .advanced import RuntimeConfig
+    from serialforge.advanced import RuntimeConfig
 
     return RuntimeConfig()
 
@@ -257,7 +281,24 @@ def _default_runtime_config() -> Any:
 # pylint: disable=too-many-instance-attributes
 @dataclass(frozen=True)
 class DeviceProfile:
-    """Describe how a device is identified and opened."""
+    """Describe how a device is identified, opened and framed.
+
+    Args:
+        vid_pid: Non-empty USB identity pairs used for automatic discovery.
+        baudrates: Non-empty, unique, positive candidate rates, in probe order.
+        probe: SINGLE CommandSpec or advanced.ProbeSpec that cannot match echo.
+        name: Optional display name; defaults to the first USB identity.
+        terminator: Text suffix for transmitted requests; defaults to CRLF.
+        encoding: Text encoding used at the bytes boundary; defaults to UTF-8.
+        echo: Drop echoed requests before matching responses when True.
+        heartbeat_s: Positive probe interval in seconds; None disables it.
+        serial: SerialConfig; None selects 8N1 with normal settling defaults.
+        framing: Receive framing, independent of the transmit terminator.
+        runtime: Queueing, probing, reconnect and backpressure policy.
+
+    Raises:
+        ConfigError: An identity, rate, probe or timing setting is invalid.
+    """
 
     vid_pid: Sequence[tuple[int, int]]
     baudrates: Sequence[int]
@@ -333,7 +374,19 @@ class DeviceProfile:
 # pylint: disable=too-many-instance-attributes
 @dataclass(frozen=True)
 class LogConfig:
-    """Configure debug logging and optional per-connection files."""
+    """Configure silent-by-default DEBUG logging and connection files.
+
+    Args:
+        enabled: Enable traffic output; False is the silent default.
+        save_to_file: Additionally write files when enabled is True.
+        dir: Optional file directory; None selects the Qt application data path.
+        app_name: Optional application name for the default path.
+        max_files: Positive number of library-owned files retained (50 default).
+        max_file_bytes: Positive traffic byte cap; lifecycle events continue.
+
+    Raises:
+        ConfigError: Retention limits or the application name are invalid.
+    """
 
     enabled: bool = False
     save_to_file: bool = False
@@ -356,7 +409,19 @@ class LogConfig:
 # pylint: disable=too-many-instance-attributes
 @dataclass(frozen=True)
 class DeviceInfo:
-    """Describe a discovered device and the successful probe."""
+    """Describe a discovered device and the successful probe.
+
+    Attributes:
+        port: OS port name, including COM10 and higher.
+        vid: Optional USB vendor ID.
+        pid: Optional USB product ID.
+        serial_number: Optional stable USB serial number.
+        location: Optional USB location, used as a fallback identity.
+        description: Optional driver-supplied description.
+        baudrate: Working rate, or None for an unprobed descriptor.
+        response: Raw successful probe bytes or text, if available.
+        elapsed_s: Probe duration in seconds, if measured.
+    """
 
     port: str
     vid: int | None = None
@@ -371,7 +436,15 @@ class DeviceInfo:
 
 @dataclass(frozen=True)
 class DeviceEvent:
-    """Carry a device event, stream frame, or unrecognised frame."""
+    """Carry a device event, stream frame, or unrecognised frame.
+
+    Attributes:
+        spec: Original event/STREAM declaration; None for unknown frames.
+        request_id: STREAM invocation ID, or None for an unsolicited event.
+        data: Parsed value or decoded raw frame text.
+        raw_frame: Original receive frame without its delimiter.
+        timestamp: Monotonic timestamp in seconds.
+    """
 
     spec: EventSpec | CommandSpec | None = None
     request_id: str | None = None
@@ -384,7 +457,20 @@ class DeviceEvent:
 # pylint: disable=too-many-instance-attributes
 @dataclass(frozen=True)
 class CommandResult:
-    """Carry one command's terminal status and parsed response."""
+    """Carry one invocation's terminal status and parsed response.
+
+    Attributes:
+        spec: Original declaration, or None for an unmatched raw text send.
+        route: SPEC, MATCHED or RAW resolution path.
+        params: Immutable mapping of rendered request parameters.
+        sent: Transmitted bytes; empty when no write was attempted.
+        status: Terminal CommandStatus; ok is True only for OK.
+        data: SINGLE value, MULTI list, or None when no parsed data exists.
+        raw_frames: Immutable response frames, retaining original wire contents.
+        elapsed_s: Monotonic duration from the write attempt, in seconds.
+        request_id: Invocation ID shared with its ticket.
+        error_message: Optional explanation of a device, parse or I/O error.
+    """
 
     spec: CommandSpec | None = None
     route: SendRoute = SendRoute.SPEC

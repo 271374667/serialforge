@@ -5,21 +5,19 @@ from __future__ import annotations
 import threading
 from typing import TYPE_CHECKING
 
-from typing_extensions import override
-
 # pylint: disable=no-name-in-module
 from PySide6.QtCore import QThread
 
-from ..advanced import FramingConfig
-from ..errors import FramingError
-from ..protocols import TransportProtocol
-from ..transport import FrameSplitter
+from serialforge.advanced import FramingConfig
+from serialforge.errors import FramingError
+from serialforge.protocols import TransportProtocol
+from serialforge.transport import FrameSplitter
 
 # The read loop reports frames to its owning facade through private hooks.
 # pylint: disable=protected-access
 
 if TYPE_CHECKING:
-    from .serial_handler import SerialHandler
+    from serialforge.connection.serial_handler import SerialHandler
 
 
 class ReadThread(QThread):
@@ -44,7 +42,8 @@ class ReadThread(QThread):
         self._stop.set()
         self._transport.cancel_read()
 
-    @override
+    # ty: ignore[missing-override-decorator] -- Python 3.11 has no typing.override;
+    # do not require a development-only backport to run the installed library.
     def run(self) -> None:
         """Read promptly and flush a silence-gap frame while idle."""
         try:

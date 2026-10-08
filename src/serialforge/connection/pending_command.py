@@ -6,9 +6,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from ..advanced import CommandTicket
-from ..enums import CommandPriority, SendRoute
-from ..models import CommandSpec
+from serialforge.advanced import CommandTicket
+from serialforge.enums import CommandPriority, SendRoute
+from serialforge.models import CommandSpec
 
 
 # One invocation needs these independent timing and result fields.

@@ -23,8 +23,8 @@ from serialforge import (
 from serialforge.advanced import FramingConfig, RuntimeConfig, SerialConfig
 from serialforge.enums import FramingMode
 from serialforge.errors import SerialForgeError
-from serialforge.testing import FakeBackend, SimulatedDevice, use_fake_backend
 from serialforge.transport import PortRegistry
+from tests.support import FakeBackend, SimulatedDevice, use_fake_backend
 
 
 @dataclass(frozen=True)

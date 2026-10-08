@@ -6,7 +6,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from threading import RLock
 
-from ..errors import PortBusyError
+from serialforge.errors import PortBusyError
 
 
 class PortRegistry:

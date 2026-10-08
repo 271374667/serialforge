@@ -7,8 +7,8 @@ from dataclasses import fields, is_dataclass
 from enum import Enum
 from typing import Any, get_type_hints
 
-from ..errors import CommandError
-from ..models import CommandSpec, EventSpec
+from serialforge.errors import CommandError
+from serialforge.models import CommandSpec, EventSpec
 
 
 # Parsing branches correspond to the public result data-shape table.

@@ -15,6 +15,8 @@
 
 ## 2. 全局常量与 `__version__`
 
+- serialforge 的测试替身只放 `tests/support/`；wheel 与 sdist 均不包含 `tests/`、`examples/`、测试替身或 `serialforge.testing`。构建后检查 ZIP/TAR 成员清单，不能只看目录位置或构建成功。
+
 - 项目要有一个**存放全局常量的模块**（如 `constants.py`、`_version.py`），
   集中放 `__version__` 等全局常量，避免版本号散落在多个文件里。
 - `__version__` 必须是**单一真源**：打包配置（pyproject / setup / 打包脚本）从它读取或同步；
