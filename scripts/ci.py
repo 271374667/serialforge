@@ -179,8 +179,7 @@ def development_constraints() -> list[str]:
         if package["name"] == "serialforge"
     )
     names = {
-        dependency["name"]
-        for dependency in project["dev-dependencies"]["dev"]
+        dependency["name"] for dependency in project["dev-dependencies"]["dev"]
     }
     constraints: list[str] = []
     for package in lock["package"]:
