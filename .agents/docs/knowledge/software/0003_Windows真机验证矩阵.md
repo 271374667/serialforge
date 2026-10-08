@@ -37,7 +37,10 @@ Remove-Item Env:SERIALFORGE_RUN_HARDWARE
 
 回环测试直连显式的 DeviceInfo，不做探测；发送 `SERIALFORGE_LOOPBACK\r\n` 并要求完整
 回显。默认 pytest 即使设置了启用变量，也只有选择 `-m hardware` 才能执行硬件测试。
-M7 本次未打开任何真实端口。
+2026-10-08 本次 Windows 11 现场复测已打开 COM11。`test_real_port_tx_rx_loopback` 能建立
+连接，但发送 `SERIALFORGE_LOOPBACK\r\n` 后 1 秒超时，没有收到回显；这项结果不能替代
+已正确短接 TX/RX 的回环结论。随后在 `dtr=False`、`rts=False` 下发送只读的
+ `Version\r\n`，收到 `Software version 1.02`。
 
 ### 矩阵
 
@@ -45,7 +48,7 @@ M7 本次未打开任何真实端口。
 
 | 系统 | 芯片/适配器 | 正常收发 | 拔插重连 | 睡眠唤醒 | TX-RX 回环 | DTR/RTS | 计时粒度 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Windows 11 x64 | Prolific PL2303 (`067B:23A3`) | 已验证：COM11 `Version` 查询/发现 | 未验证 | 未验证 | 未验证 | 未验证 `dtr=False` 脉冲 | 未验证 |
+| Windows 11 x64 | Prolific PL2303GT (`067B:23A3`) | 已验证：COM11 `Version` 查询/发现，收到 `Software version 1.02` | 未验证 | 未验证 | 未通过：连接成功但回环无回显，未确认 TX-RX 物理短接 | 部分验证：`dtr=False`/`rts=False` 下 `Version` 成功；脉冲未测 | 已测：1 ms 中位 1.516 ms |
 | Windows 11 x64 | CH340 | 未验证 | 未验证 | 未验证 | 未验证 | 未验证 | 未验证 |
 | Windows 11 x64 | CP210x 或 FTDI | 未验证 | 未验证 | 未验证 | 未验证 | 未验证 | 未验证 |
 | Windows 10 x64 | Prolific PL2303 | 未验证 | 未验证 | 未验证 | 未验证 | 未验证 | 未验证 |
@@ -62,7 +65,7 @@ M7 本次未打开任何真实端口。
 | 1 ms | 1.023 ms | 1.528 ms | 2.585 ms |
 | 5 ms | 5.024 ms | 5.501 ms | 6.334 ms |
 
-1 ms 请求的样本说明本主机当前调度没有 15.6 ms 的固定下限，可保留 5 ms 名义
+本次复测 1 ms 请求 100 次：最短 1.020 ms，中位 1.516 ms，最长 2.210 ms。该样本说明本主机当前调度没有 15.6 ms 的固定下限，可保留 5 ms 名义
 `poll_min_s`；实际等待含调度开销，不承诺精确 5 ms。结果不代表串口驱动定时器、
 遮挡/省电场景或 Windows 10；矩阵中的硬件相关计时仍未验证。
 
@@ -81,6 +84,14 @@ M7 本次未打开任何真实端口。
 wheel 和 sdist 成员检查确认没有 tests、testing、examples 或字节码。最低解析在临时
 副本固定开发工具，完整 CI 未修改仓库锁文件。6.11.2 是本次已验证的保守 Qt 下限；
 测试过的部分旧版本存在 signal.connect 与业务 connect 名称冲突，中间版本未逐一验证。
+
+### 本次现场记录（2026-10-08）
+
+- Windows 11 x64，内部版本 `10.0.26200`；Python `3.11.12`，64 位。
+- Prolific PL2303GT（`067B:23A3`），`COM11`，`115200` 波特率。
+- `dtr=False`、`rts=False` 下 `Version\r\n` 收到 `Software version 1.02`。
+- 回环用例连接成功，但 `SERIALFORGE_LOOPBACK\r\n` 在 1 秒内无回显；未确认独立适配器 TX/RX 物理短接。
+- Windows 计时脚本 100 个 1 ms 样本：`1.020 / 1.516 / 2.210 ms`（最短 / 中位 / 最长）。
 
 ### 现场记录模板
 

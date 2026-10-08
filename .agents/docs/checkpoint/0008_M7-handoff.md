@@ -1,7 +1,7 @@
 # 0008_M7-handoff
 
-> 关联任务: todo/0007_M7_集成演示与发布前验收.md | 更新: 2026-10-08 | 进度: M7 软件验收通过，真机矩阵未完成
-> 最近代码 commit: 38d30d0（pytest-xdist 加速与完整发布前 CI 已通过并提交 dev）
+> 关联任务: todo/0007_M7_集成演示与发布前验收.md | 更新: 2026-10-08 | 进度: M7 软件验收通过，Windows 11 部分真机结果已记录
+> 最近代码 commit: 73faa31（文档迁移到 `.agents/docs`；软件验收基线仍已通过）
 
 ## 已完成
 
@@ -24,14 +24,15 @@
 
 ## 进行中（下一步从这里继续）
 
-- 软件交付已提交到 dev；接下来补齐 `.agents/docs/knowledge/software/0003_Windows真机验证矩阵.md`
-  的 Windows 10/11 与至少两种芯片真机矩阵。
-- 当前环境缺少完整矩阵所需机器、芯片和接线条件；任务仍激活，不以模拟测试代替真机验收。
+- 软件交付已提交到 dev；Windows 11/Prolific 的本次结果已补入 `.agents/docs/knowledge/software/0003_Windows真机验证矩阵.md`。
+- `COM11` 可打开并完成 `Version` 查询；独立 TX-RX 回环用例连接成功但 1 秒无回显，未确认物理短接。
+- Windows 10、第二种芯片及完整接线矩阵仍需真实设备，任务继续激活。
 
 ## 待办
 
-- Windows 10/第二种芯片/拔插/睡眠/DTR-RTS/回环保留未验证；完成实测后再做 M7 最终报告及任务归档。
-- 用户没有授权新的真机命令或接线，不自动打开 COM11 或其他真实端口。
+- Windows 10/第二种芯片/拔插/睡眠仍未验证；DTR/RTS 仅验证 `False` 配置下的 Version 收发，脉冲行为未测。
+- 回环需独立适配器 TX/RX 物理短接；当前用例记录为未通过，不能记作矩阵通过。
+- 完成剩余实测后再做 M7 最终报告及任务归档；当前不自动打开其他真实端口。
 
 ## 关键上下文
 
@@ -41,8 +42,9 @@
   temp/0003_testing_bytecode，生产目录已不存在。测试替身和示例不进入 wheel/sdist。
 - 测试与 Demo 改用 tests.support；wheel 冒烟仅复制外置验收输入，不复制 src。
 - `uv run pytest` 默认 `-n auto --maxprocesses=4 --dist worksteal`；`-n 0` 串行调试，精确 `-m hardware` 选择强制串行且仍须显式启用与配置端口。
-- 计时已实测 Windows 11 build 26200 / Python 3.11.12 x64：1 ms sleep 的中位 1.528 ms，
-  5 ms 的中位 5.501 ms；仅证明本机名义 5 ms 无 15.6 ms 固定下限，不证明硬件时序。
+- 计时已实测 Windows 11 build 26200 / Python 3.11.12 x64：本次 1 ms 100 样本为
+  1.020 / 1.516 / 2.210 ms（最短 / 中位 / 最长）；历史 5 ms 中位 5.501 ms。
+  仅证明本机名义 5 ms 无 15.6 ms 固定下限，不证明硬件时序。
 
 ## 验证方式
 
