@@ -24,3 +24,7 @@ data/
 # Normalization snapshots and one-off generated artifacts
 temp/
 outputs/
+
+# 项目开发初期辅助文档（不属于项目文件，不纳入版本控制）
+/Codex提示词_v1.md
+/串口通讯模块_方案_v10定稿.md
