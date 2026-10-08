@@ -1,7 +1,7 @@
 # serialforge · 架构总览
 
-> 类型: 活文档（原地更新，不编号、不归档）  |  最后更新: 2026-09-30
-> 基线 commit: 40ab7e7（M2 已完成，等待阶段确认）  |  适用版本: 0.0.1
+> 类型: 活文档（原地更新，不编号、不归档）  |  最后更新: 2026-10-08
+> 基线 commit: 1716749（M3 已完成，等待确认进入 M4）  |  适用版本: 0.0.1
 > 形态: 完整  |  维护: AI 更新（见 `.agents/rules/15_architecture_doc.md`）
 > 读法: 第 1、2、3、6 节为必读区（每次会话读，合计 ≤150 行）；其余按需读
 
@@ -30,7 +30,7 @@
 | `src/serialforge/transport/` | 字节流、定界、校验、延迟与端口后端 | `__init__.py`：M2 传输组件 | 内部模块 | L0 | discovery/connection/testing |
 | `src/serialforge/connection/` | handler、注册表、调度、重连 | M4/M5 实现 | 顶层门面 | L0-L2 | `__init__.py` |
 | `src/serialforge/discovery/` | 扫描、探测、缓存 | M6 实现 | `DeviceFinder` | L0-L1 | connection/顶层 |
-| `src/serialforge/diagnostics/` | 流量与文件日志 | M3 实现 | advanced 记录类型 | L0-L1 | connection |
+| `src/serialforge/diagnostics/` | 流量与文件日志 | `traffic_logger.py:TrafficLogger`、`log_file_manager.py:LogFileManager` | 内部诊断组件 | L0-L1 | connection |
 | `src/serialforge/testing/` | 可脚本化假后端与模拟设备 | `__init__.py`：M2 假后端组件 | testing 命名空间 | L0-L1 | tests/使用方 |
 | `tests/` | 契约、守卫、单元和 API 快照 | `test_*.py` | 本地验证 | src | CI |
 
@@ -70,5 +70,6 @@
 
 | 日期 | commit | 改了什么 |
 | --- | --- | --- |
-| 2026-10-01 | 40ab7e7 | M2 传输基础设施、假后端和规范化迁移已提交；等待阶段确认 |
+| 2026-10-08 | 1716749 | 同步 M3 已完成的诊断模块与阶段状态；等待确认进入 M4 |
+| 2026-10-01 | 40ab7e7 | M2 传输基础设施、假后端和规范化迁移已提交 |
 | 2026-09-30 | 98ba269 | 完成 M1 定义层与规范目录；进入 M2 传输层开发 |
