@@ -31,7 +31,7 @@ from .response_parser import ResponseParser
 
 
 # One dispatcher owns the synchronized queue, in-flight state, and deadlines.
-# pylint: disable=too-many-instance-attributes
+# pylint: disable=too-many-instance-attributes,too-many-boolean-expressions
 class CommandDispatcher(QObject):
     """Run the M4 command state machine on a transport owner's thread.
 
@@ -68,6 +68,10 @@ class CommandDispatcher(QObject):
         self._writing_pending: PendingCommand | None = None
         self._sequence: int = 0
         self._connected: bool = False
+        self._reconnecting: bool = False
+        self._retry_after_reconnect: list[
+            tuple[CommandSpec, Mapping[str, object], CommandPriority]
+        ] = []
         self._last_write_at: float | None = None
         self._drain_until: float = 0.0
         self._clear_input: Callable[[], None] | None = None
@@ -80,11 +84,16 @@ class CommandDispatcher(QObject):
         self._lock: threading.RLock = threading.RLock()
 
     def set_connected(
-        self, connected: bool, *, user_initiated: bool = False
+        self,
+        connected: bool,
+        *,
+        user_initiated: bool = False,
+        reconnecting: bool = False,
     ) -> None:
         """Mark transport availability and finish outstanding work on loss."""
         with self._lock:
             self._connected = connected
+            self._reconnecting = reconnecting and not connected
             if not connected:
                 status = (
                     CommandStatus.CANCELLED
@@ -95,10 +104,23 @@ class CommandDispatcher(QObject):
                 if self._writing_pending is not None:
                     active.append(self._writing_pending)
                 for pending in tuple(active):
+                    if reconnecting:
+                        self._remember_retry(pending)
                     self._finish(pending, status)
+                if not reconnecting:
+                    self._retry_after_reconnect.clear()
                 self._drain_until = 0.0
                 self._latency.reset()
                 self._auto_rto = 1.0
+            elif self._retry_after_reconnect:
+                retry = tuple(self._retry_after_reconnect)
+                self._retry_after_reconnect.clear()
+                for spec, params, priority in retry:
+                    if self._registry.contains(spec):
+                        # Placeholder values are intentionally opaque objects;
+                        # ``submit`` validates their string rendering.
+                        # ty: ignore[invalid-argument-type] -- retry params are command values.
+                        self.submit(spec, priority=priority, **params)
 
     def set_clear_input(self, clear_input: Callable[[], None]) -> None:
         """Provide the transport's input-buffer drain action."""
@@ -181,7 +203,9 @@ class CommandDispatcher(QObject):
                 sequence=self._sequence,
                 queued_at=now,
             )
-            if not self._connected:
+            if not self._connected and not (
+                self._reconnecting and self._runtime.queue_while_reconnecting
+            ):
                 self._finish(pending, CommandStatus.DISCONNECTED)
             elif (
                 self._streams
@@ -513,6 +537,7 @@ class CommandDispatcher(QObject):
             written = self._write(pending.sent)
         except (OSError, RuntimeError) as exc:
             with self._lock:
+                self._remember_retry(pending)
                 self._finish(
                     pending,
                     CommandStatus.DISCONNECTED,
@@ -521,6 +546,7 @@ class CommandDispatcher(QObject):
             return
         with self._lock:
             if written != len(pending.sent):
+                self._remember_retry(pending)
                 self._finish(
                     pending,
                     CommandStatus.DISCONNECTED,
@@ -533,6 +559,21 @@ class CommandDispatcher(QObject):
                 self._finish(pending, CommandStatus.CANCELLED)
             elif spec is None or spec.mode is ResponseMode.NO_REPLY:
                 self._finish(pending, CommandStatus.OK)
+
+    def _remember_retry(self, pending: PendingCommand) -> None:
+        """Retain one safe invocation after a failed transport write."""
+        spec = pending.spec
+        if (
+            self._runtime.resend_idempotent
+            and pending.started_at is not None
+            and spec is not None
+            and spec.idempotent
+            and not pending.ticket.cancelled
+            and not pending.finished
+        ):
+            self._retry_after_reconnect.append(
+                (spec, pending.params, pending.priority)
+            )
 
     def timeout(self, pending: PendingCommand, now: float) -> None:
         """Finish an expired invocation and isolate late exclusive frames."""

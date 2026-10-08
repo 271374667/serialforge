@@ -31,13 +31,15 @@ class FakeBackend:
         self, port: str, params: Mapping[str, object]
     ) -> TransportProtocol:
         """Open a simulated port and record its transport for assertions."""
-        del params
         device = next(
             (item for item in self.devices if item.port == port), None
         )
         if device is None:
             raise OSError(f"simulated port not found: {port}")
-        transport = FakeTransport(device)
+        baudrate = params.get("baudrate")
+        transport = FakeTransport(
+            device, baudrate if isinstance(baudrate, int) else None
+        )
         self.transports.append(transport)
         return transport
 

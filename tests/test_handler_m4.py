@@ -12,10 +12,13 @@ from serialforge.connection import SerialHandler
 from serialforge.errors import CommandError
 
 VERSION = CommandSpec("Version", r"Software version (?P<version>\S+)")
+_APP: QCoreApplication | None = None
 
 
 def make_handler() -> SerialHandler:
     """Construct a disconnected facade with a valid device profile."""
+    global _APP  # noqa: PLW0603 -- retain the single Qt application in tests.
+    _APP = QCoreApplication.instance() or QCoreApplication([])
     profile = DeviceProfile(
         vid_pid=[(0x067B, 0x23A3)],
         baudrates=[115200],

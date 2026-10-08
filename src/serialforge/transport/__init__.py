@@ -4,6 +4,7 @@ from .backend_switch import BackendSwitch
 from .checksum_calculator import ChecksumCalculator
 from .frame_splitter import FrameSplitter
 from .latency_tracker import LatencyTracker
+from .port_options import PortOptions
 from .port_registry import PortRegistry
 from .serial_transport import SerialTransport
 
@@ -13,5 +14,6 @@ __all__ = [
     "FrameSplitter",
     "LatencyTracker",
     "PortRegistry",
+    "PortOptions",
     "SerialTransport",
 ]

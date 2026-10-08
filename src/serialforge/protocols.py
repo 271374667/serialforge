@@ -40,3 +40,14 @@ class TransportProtocol(Protocol):
 
     def cancel_write(self) -> None:
         """Interrupt a blocked write."""
+
+    def reset_input_buffer(self) -> None:
+        """Discard stale input after a command timeout."""
+
+    def set_buffer_size(self, rx_size: int) -> None:
+        """Request a driver receive buffer size when supported."""
+
+    def set_control_lines(
+        self, *, dtr: bool | None = None, rts: bool | None = None
+    ) -> None:
+        """Apply explicitly configured control line values."""

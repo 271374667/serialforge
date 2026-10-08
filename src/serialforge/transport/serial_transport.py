@@ -59,6 +59,10 @@ class SerialTransport:
         if connection is not None and hasattr(connection, "cancel_write"):
             connection.cancel_write()
 
+    def reset_input_buffer(self) -> None:
+        """Discard queued input after an exclusive command timeout."""
+        self._require_connection().reset_input_buffer()
+
     def set_buffer_size(self, rx_size: int) -> None:
         """Request a driver receive buffer size."""
         connection = self._require_connection()

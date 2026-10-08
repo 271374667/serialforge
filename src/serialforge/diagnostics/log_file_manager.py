@@ -132,6 +132,23 @@ class LogFileManager:
         with self._lock:
             return self._path
 
+    @property
+    def dropped_rows(self) -> int:
+        """Return the number of traffic rows omitted by the file limit."""
+        with self._lock:
+            return self._dropped_rows
+
+    def set_config(self, config: LogConfig) -> None:
+        """Apply runtime policy without splitting an existing file session."""
+        with self._lock:
+            self._config = config
+            self._enabled = config.enabled
+            self._save_to_file = config.save_to_file
+            if self._enabled and self._save_to_file:
+                self._start_sink_if_enabled()
+            else:
+                self._stop_sink()
+
     def begin_connection(self, connection_id: str) -> Path | None:
         """Start a connection session without creating a file during probing."""
         if not connection_id:

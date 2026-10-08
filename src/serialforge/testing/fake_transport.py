@@ -8,13 +8,19 @@ from threading import Condition
 
 from .simulated_device import SimulatedDevice
 
+# The fake handle mirrors the real transport's independent control state.
+# pylint: disable=too-many-instance-attributes
+
 
 class FakeTransport:
     """Connect a caller to one scriptable :class:`SimulatedDevice`."""
 
-    def __init__(self, device: SimulatedDevice) -> None:
+    def __init__(
+        self, device: SimulatedDevice, baudrate: int | None = None
+    ) -> None:
         """Create a closed-in-memory connection for ``device``."""
         self._device = device
+        self._baudrate: int | None = baudrate
         self._incoming: deque[bytes] = deque()
         self._condition = Condition()
         self._closed = False
@@ -70,7 +76,12 @@ class FakeTransport:
             raise OSError("simulated disconnect")
         if self._device.latency_s > 0:
             time.sleep(self._device.latency_s)
-        chunks = self._device.response_for(bytes(data))
+        chunks = (
+            self._device.response_for(bytes(data))
+            if self._device.baudrate is None
+            or self._device.baudrate == self._baudrate
+            else [b"\x00"]
+        )
         with self._condition:
             self._incoming.extend(chunks)
             self._condition.notify_all()
@@ -97,6 +108,21 @@ class FakeTransport:
     def cancel_write(self) -> None:
         """Cancel the next write operation."""
         self._cancelled_write = True
+
+    def reset_input_buffer(self) -> None:
+        """Discard pending fake response chunks."""
+        with self._condition:
+            self._incoming.clear()
+
+    def set_buffer_size(self, rx_size: int) -> None:
+        """Accept a simulated driver receive buffer request."""
+        del rx_size
+
+    def set_control_lines(
+        self, *, dtr: bool | None = None, rts: bool | None = None
+    ) -> None:
+        """Accept explicit simulated control line settings."""
+        del dtr, rts
 
 
 __all__ = ["FakeTransport"]

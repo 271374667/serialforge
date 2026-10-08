@@ -31,6 +31,7 @@ class SimulatedDevice:
     chunk_size: int | None = None
     echo: bool = False
     disconnect_after_writes: int | None = None
+    baudrate: int | None = None
 
     @property
     def device(self) -> str:

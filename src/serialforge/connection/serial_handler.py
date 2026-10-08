@@ -1,38 +1,41 @@
-"""One-device facade for registration and command submission."""
+"""One-device QtCore facade for serial connection and command lifecycle."""
 
 from __future__ import annotations
 
 import threading
-from typing import TYPE_CHECKING, Any
+from dataclasses import replace
+from typing import TYPE_CHECKING
 
 # PySide6 exposes these C++ types through generated bindings, which pylint
 # cannot resolve even though ty and Python imports can.
 # pylint: disable=no-name-in-module
-from PySide6.QtCore import QObject, Qt, QThread, Signal
+from PySide6.QtCore import QCoreApplication, QObject, Qt, QThread, Signal
 
 # pylint: enable=no-name-in-module
-from ..enums import CommandStatus, ConnectionState
-from ..errors import CommandError
+from ..advanced import CommandPriority, CommandTicket, HandlerStats
+from ..diagnostics import TrafficLogger
+from ..enums import CommandStatus, ConnectionState, SendRoute
+from ..errors import CommandError, SerialForgeError
 from ..models import (
     CommandResult,
     CommandSpec,
     DeviceInfo,
     DeviceProfile,
     EventSpec,
+    LogConfig,
 )
 from .command_registry import CommandRegistry
+from .connection_worker import ConnectionWorker
+
+# The facade owns the complete lifecycle state for one serial connection.
+# pylint: disable=too-many-instance-attributes
 
 if TYPE_CHECKING:
-    from ..advanced import CommandPriority, CommandTicket
     from .command_dispatcher import CommandDispatcher
 
 
 class SerialHandler(QObject):
-    """Expose the future one-device connection facade.
-
-    M1 defines the public shape only. Transport, dispatch and lifecycle
-    behavior are implemented in M2-M5.
-    """
+    """Coordinate one connection, its command registry, and Qt signals."""
 
     connection_state_changed = Signal(ConnectionState)
     command_finished = Signal(object)
@@ -44,22 +47,36 @@ class SerialHandler(QObject):
         self,
         profile: DeviceProfile,
         *,
-        log: Any = None,
+        log: LogConfig | None = None,
         allow_raw_text: bool = True,
     ) -> None:
-        """Create a not-yet-connected handler for ``profile``."""
+        """Create a disconnected handler with no open serial resources."""
+        application = QCoreApplication.instance()
+        if application is None:
+            raise SerialForgeError("SerialHandler requires a QCoreApplication")
         super().__init__()
         self._profile: DeviceProfile = profile
-        self._log: Any = log
+        self._log: LogConfig = log or LogConfig()
         self._allow_raw_text: bool = allow_raw_text
         self._state: ConnectionState = ConnectionState.DISCONNECTED
+        self._state_lock: threading.RLock = threading.RLock()
+        self._worker: ConnectionWorker | None = None
+        self._traffic: TrafficLogger = TrafficLogger(
+            self._log, profile.runtime, encoding=profile.encoding
+        )
+        self._traffic.traffic_logged.connect(
+            self.traffic_logged.emit, Qt.ConnectionType.DirectConnection
+        )
+        self._traffic.error_occurred.connect(
+            self._report_error, Qt.ConnectionType.DirectConnection
+        )
         self._registry: CommandRegistry = CommandRegistry(profile.terminator)
         # Keep the top-level package import free of advanced implementation.
         # pylint: disable=import-outside-toplevel
         from .command_dispatcher import CommandDispatcher
 
         self._dispatcher: CommandDispatcher = CommandDispatcher(
-            profile, self._registry, self._write_unavailable
+            profile, self._registry, self._write
         )
         self._dispatcher.command_finished.connect(
             self.command_finished.emit, Qt.ConnectionType.DirectConnection
@@ -70,31 +87,100 @@ class SerialHandler(QObject):
         self._dispatcher.error_occurred.connect(
             self.error_occurred.emit, Qt.ConnectionType.DirectConnection
         )
+        self._dispatcher.tx_written.connect(
+            self._record_tx, Qt.ConnectionType.DirectConnection
+        )
         self._init_sequence: tuple[CommandSpec | str, ...] = ()
+        application.aboutToQuit.connect(self.disconnect)
 
-    @staticmethod
-    def _write_unavailable(data: bytes) -> int:
-        """Fail if a disconnected facade is accidentally asked to write."""
-        del data
-        raise RuntimeError("serial transport is not connected")
+    def _write(self, data: bytes) -> int:
+        """Send bytes through the active connection worker."""
+        worker = self._worker
+        if worker is None:
+            raise RuntimeError("serial transport is not connected")
+        return worker.write(data)
 
     @property
     def state(self) -> ConnectionState:
         """Return the current connection state."""
-        return self._state
+        with self._state_lock:
+            return self._state
 
     # ty: ignore[invalid-method-override, missing-override-decorator] --
     # QObject has an unrelated C++ signal-connect overload with the same name.
     def connect(self, target: str | DeviceInfo | None = None) -> None:
-        """Connect to a device; implemented after the M1 skeleton."""
-        del target
-        raise NotImplementedError("SerialHandler.connect is planned for M5")
+        """Start an asynchronous connection to a device or matching profile."""
+        with self._state_lock:
+            if self._state not in {
+                ConnectionState.DISCONNECTED,
+                ConnectionState.FAILED,
+            }:
+                raise SerialForgeError(
+                    f"cannot connect while {self._state.value}"
+                )
+            worker = self._worker
+            if worker is not None and worker.isRunning():
+                raise SerialForgeError(
+                    "previous connection worker is still running"
+                )
+            self._worker = ConnectionWorker(self, target)
+        self._transition(
+            ConnectionState.CONNECTING
+            if isinstance(target, DeviceInfo)
+            else ConnectionState.PROBING
+        )
+        assert self._worker is not None
+        self._worker.start()
 
     # ty: ignore[invalid-method-override, missing-override-decorator] --
     # This public facade method intentionally shadows QObject.disconnect().
     def disconnect(self) -> None:
-        """Disconnect from the device; implemented after the M1 skeleton."""
-        raise NotImplementedError("SerialHandler.disconnect is planned for M5")
+        """Stop the connection and join its I/O threads idempotently."""
+        worker = self._worker
+        if worker is not None:
+            worker.request_stop()
+            for _ in range(50):
+                if worker.wait(100):
+                    break
+                worker.request_stop()
+            else:
+                raise SerialForgeError("connection worker did not stop")
+            self._worker = None
+        self._dispatcher.set_connected(False, user_initiated=True)
+        self._traffic.end_connection()
+        self._transition(ConnectionState.DISCONNECTED)
+
+    def _transition(self, state: ConnectionState) -> None:
+        """Publish a state change from either connection thread."""
+        with self._state_lock:
+            if self._state is state:
+                return
+            self._state = state
+        self.connection_state_changed.emit(state)
+
+    def _report_error(self, error: Exception) -> None:
+        """Normalize I/O failures to the public exception hierarchy."""
+        payload = (
+            error
+            if isinstance(error, SerialForgeError)
+            else SerialForgeError(str(error))
+        )
+        self.error_occurred.emit(payload)
+
+    def _receive_frame(self, frame: bytes) -> None:
+        """Record and dispatch one completed receive frame."""
+        worker = self._worker
+        port = worker.port if worker is not None else None
+        self._traffic.record_rx(port or "-", frame)
+        self._dispatcher.receive_frame(frame)
+
+    def _record_tx(
+        self, data: bytes, route: SendRoute, spec: CommandSpec | None
+    ) -> None:
+        """Record a successful command write with its original spec."""
+        worker = self._worker
+        port = worker.port if worker is not None else None
+        self._traffic.record_tx(port or "-", data, route, spec)
 
     def register(self, *specs: CommandSpec | EventSpec) -> None:
         """Register command and event declarations by object identity."""
@@ -138,9 +224,6 @@ class SerialHandler(QObject):
     ) -> CommandTicket:
         """Queue a registered command or safe raw text without blocking."""
         if priority is None:
-            # pylint: disable=import-outside-toplevel
-            from ..advanced import CommandPriority
-
             priority = CommandPriority.NORMAL
         return self._dispatcher.submit(
             target,
@@ -188,13 +271,14 @@ class SerialHandler(QObject):
         finally:
             self.command_finished.disconnect(on_finished)
 
-    def set_log_config(self, config: Any) -> None:
-        """Set logging configuration; implemented in M3."""
-        del config
-        raise NotImplementedError(
-            "SerialHandler.set_log_config is planned for M3"
-        )
+    def set_log_config(self, config: LogConfig) -> None:
+        """Apply log switches and retain file policy for this session."""
+        self._log = config
+        self._traffic.set_log_config(config)
 
-    def stats(self) -> Any:
-        """Return handler statistics; implemented in M2/M5."""
-        raise NotImplementedError("SerialHandler.stats is planned for M2")
+    def stats(self) -> HandlerStats:
+        """Return latency, event, and file traffic drop counters."""
+        return replace(
+            self._dispatcher.stats(),
+            dropped_traffic_lines=self._traffic.dropped_traffic_lines,
+        )

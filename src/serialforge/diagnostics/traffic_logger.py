@@ -89,6 +89,17 @@ class TrafficLogger(QObject):
         """Return the current connection's file path when file logging began."""
         return self._manager.current_path
 
+    @property
+    def dropped_traffic_lines(self) -> int:
+        """Return the file sink's cumulative dropped traffic rows."""
+        return self._manager.dropped_rows
+
+    def set_log_config(self, config: LogConfig) -> None:
+        """Apply a complete runtime log policy to this traffic session."""
+        self._config = config
+        self._enabled = config.enabled
+        self._manager.set_config(config)
+
     def begin_connection(self, port: str) -> None:
         """Begin a log session after a connection has reached CONNECTED."""
         if self._connection_id is not None:
