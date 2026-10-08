@@ -2,7 +2,7 @@
 
 ## 分支
 
-- 工作分支使用 `feat/*` 或 `fix/*`，完成后只合并到 `dev`；`master`/`main` 只由用户管理。
+- 快速迭代阶段所有开发和提交直接在 `dev`；用户宣布稳定后恢复使用 `feat/*` 或 `fix/*`，完成后只合并到 `dev`；`master`/`main` 只由用户管理。
 - 未经用户明确许可不执行 `git push`、tag、发布或强制历史改写。
 - 当前项目已设置 `core.hooksPath=.githooks`，只有 `commit-msg` 钩子。
 
