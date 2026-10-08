@@ -20,6 +20,7 @@ from serialforge import (
 )
 from serialforge.advanced import (
     CommandPriority,
+    FramingConfig,
     RuntimeConfig,
     SendRoute,
     TimeoutPolicy,
@@ -27,7 +28,9 @@ from serialforge.advanced import (
 from serialforge.connection.command_dispatcher import CommandDispatcher
 from serialforge.connection.command_registry import CommandRegistry
 from serialforge.diagnostics import TrafficLogger
+from serialforge.enums import FramingMode
 from serialforge.errors import CommandError
+from serialforge.transport import FrameSplitter
 
 
 @dataclass(frozen=True)
@@ -96,6 +99,35 @@ def test_real_version_reply_without_terminator(version: str) -> None:
     assert result.data == VersionInfo(version)
     assert result.spec is VERSION
     assert result.request_id == ticket.request_id
+
+
+@pytest.mark.parametrize("version", ["1.02", "1.75", "2.10"])
+def test_unterminated_version_reply_reaches_dispatcher(version: str) -> None:
+    """Frame and match an unended reply after the requested idle interval."""
+    dispatcher, registry, writes, results, _, now = make_dispatcher()
+    registry.register(VERSION)
+    ticket = dispatcher.submit(VERSION)
+    dispatcher.pump()
+    assert writes == [b"Version\r\n"]
+
+    splitter = FrameSplitter(
+        FramingConfig(mode=FramingMode.SILENCE_GAP, silence_gap_s=0.08),
+        clock=lambda: now[0],
+    )
+    assert splitter.feed(b"Software ver") == []
+    now[0] = 0.04
+    assert splitter.feed(f"sion {version}".encode()) == []
+    now[0] = 0.119
+    assert splitter.flush() == []
+    now[0] = 0.121
+    for frame in splitter.flush():
+        dispatcher.receive_frame(frame)
+
+    assert len(results) == 1
+    assert results[0].status is CommandStatus.OK
+    assert results[0].data == VersionInfo(version)
+    assert results[0].spec is VERSION
+    assert results[0].request_id == ticket.request_id
 
 
 def test_no_reply_raw_and_unregistered_spec() -> None:
