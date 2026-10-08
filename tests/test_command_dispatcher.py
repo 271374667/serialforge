@@ -1,20 +1,32 @@
 """No-hardware tests for command scheduling and response association."""
 
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from random import Random
 
 import pytest
 
 from serialforge import (
+    CommandResult,
     CommandSpec,
     CommandStatus,
     Correlation,
+    DeviceEvent,
     DeviceProfile,
     EventSpec,
+    LogConfig,
     ResponseMode,
 )
-from serialforge.advanced import CommandPriority, RuntimeConfig, TimeoutPolicy
+from serialforge.advanced import (
+    CommandPriority,
+    RuntimeConfig,
+    SendRoute,
+    TimeoutPolicy,
+)
 from serialforge.connection.command_dispatcher import CommandDispatcher
 from serialforge.connection.command_registry import CommandRegistry
+from serialforge.diagnostics import TrafficLogger
 from serialforge.errors import CommandError
 
 
@@ -34,12 +46,19 @@ def make_dispatcher(
     *,
     runtime: RuntimeConfig | None = None,
     echo: bool = False,
-) -> tuple[CommandDispatcher, CommandRegistry, list[bytes], list[object], list[object], list[float]]:
+) -> tuple[
+    CommandDispatcher,
+    CommandRegistry,
+    list[bytes],
+    list[CommandResult],
+    list[DeviceEvent],
+    list[float],
+]:
     """Create a connected deterministic dispatcher with fake writes."""
     now = [0.0]
     writes: list[bytes] = []
-    results: list[object] = []
-    events: list[object] = []
+    results: list[CommandResult] = []
+    events: list[DeviceEvent] = []
     registry = CommandRegistry()
     profile = DeviceProfile(
         vid_pid=[(0x067B, 0x23A3)],
@@ -252,7 +271,7 @@ def test_device_error_parse_error_and_tx_annotation_once() -> None:
         error_pattern=r"ERROR .*",
     )
     registry.register(command)
-    tx: list[tuple[bytes, object, object]] = []
+    tx: list[tuple[bytes, SendRoute, CommandSpec | None]] = []
     dispatcher.tx_written.connect(
         lambda data, route, spec: tx.append((data, route, spec))
     )
@@ -299,7 +318,9 @@ def test_multi_idle_and_auto_rto_backoff() -> None:
     """Idle-complete partial MULTI data and double AUTO RTO on timeout."""
     dispatcher, registry, _, results, _, now = make_dispatcher()
     multi = CommandSpec(
-        "Read", r"VALUE (?P<value>\d+)", mode=ResponseMode.MULTI,
+        "Read",
+        r"VALUE (?P<value>\d+)",
+        mode=ResponseMode.MULTI,
         idle_timeout_s=0.2,
     )
     auto = CommandSpec("Ping", r"Pong", timeout_s=TimeoutPolicy.AUTO)
@@ -335,3 +356,254 @@ def test_stream_keeps_proactive_event_when_buffer_is_full() -> None:
     assert len(events) == 2
     assert events[0].spec is proactive
     assert events[1].spec is stream
+
+
+def test_new_stream_frame_cannot_evict_existing_device_events() -> None:
+    """Drop the incoming stream frame when the buffer has only events."""
+    dispatcher, registry, _, _, events, _ = make_dispatcher(
+        runtime=RuntimeConfig(event_queue_high_water=2)
+    )
+    stream = CommandSpec("Monitor", mode=ResponseMode.STREAM)
+    proactive = EventSpec(r"EVT (?P<state>ON|OFF)")
+    registry.register(stream, proactive)
+    dispatcher.submit(stream)
+    dispatcher.pump()
+    dispatcher.receive_frame(b"EVT ON")
+    dispatcher.receive_frame(b"EVT OFF")
+    dispatcher.receive_frame(b"RAW 1")
+    dispatcher.flush_events()
+    assert [event.data for event in events] == [
+        {"state": "ON"},
+        {"state": "OFF"},
+    ]
+    assert dispatcher.stats().dropped_events == 1
+
+
+def test_frequent_stream_preserves_other_streams_latest_event() -> None:
+    """A busy stream replaces its own queued frames before another stream."""
+    dispatcher, registry, _, _, events, _ = make_dispatcher(
+        runtime=RuntimeConfig(event_queue_high_water=2)
+    )
+    first = CommandSpec(
+        "MonitorA",
+        r"A (?P<value>\d+)",
+        mode=ResponseMode.STREAM,
+        correlation=Correlation.TAGGED,
+    )
+    second = CommandSpec(
+        "MonitorB",
+        r"B (?P<value>\d+)",
+        mode=ResponseMode.STREAM,
+        correlation=Correlation.TAGGED,
+    )
+    registry.register(first, second)
+    dispatcher.submit(first)
+    dispatcher.submit(second)
+    dispatcher.pump()
+    dispatcher.receive_frame(b"A 1")
+    dispatcher.receive_frame(b"B 1")
+    dispatcher.receive_frame(b"A 2")
+    dispatcher.receive_frame(b"A 3")
+    dispatcher.flush_events()
+    assert [(event.spec, event.data) for event in events] == [
+        (second, {"value": "1"}),
+        (first, {"value": "3"}),
+    ]
+    assert dispatcher.stats().dropped_events == 2
+
+
+def test_parse_error_and_device_event_conversion_error() -> None:
+    """Convert a bad command payload into one terminal result, not an event."""
+    dispatcher, registry, _, results, events, _ = make_dispatcher()
+    numeric = CommandSpec("Read", r"VALUE (?P<value>\S+)", int)
+    proactive = EventSpec(r"EVT (?P<value>\S+)", int)
+    registry.register(numeric, proactive)
+    errors: list[object] = []
+    dispatcher.error_occurred.connect(errors.append)
+    dispatcher.submit(numeric)
+    dispatcher.pump()
+    dispatcher.receive_frame(b"VALUE bad")
+    assert len(results) == 1
+    assert results[0].status is CommandStatus.PARSE_ERROR
+    assert results[0].raw_frames == (b"VALUE bad",)
+    dispatcher.receive_frame(b"EVT bad")
+    dispatcher.flush_events()
+    assert len(errors) == 1
+    assert not events
+
+
+def test_same_tagged_key_is_fifo_and_stream_blocks_exclusive_reply() -> None:
+    """Same-tag replies complete the oldest request; streams block barriers."""
+    dispatcher, registry, writes, results, _, _ = make_dispatcher()
+    tagged = CommandSpec(
+        "Ping {id}",
+        r"Pong (?P<id>\d+)",
+        correlation=Correlation.TAGGED,
+    )
+    stream = CommandSpec("Monitor", r"ADC .*", mode=ResponseMode.STREAM)
+    registry.register(tagged, stream, VERSION)
+    first = dispatcher.submit(tagged, id=1)
+    second = dispatcher.submit(tagged, id=1)
+    dispatcher.pump()
+    dispatcher.receive_frame(b"Pong 1")
+    dispatcher.receive_frame(b"Pong 1")
+    assert [item.request_id for item in results] == [
+        first.request_id,
+        second.request_id,
+    ]
+    dispatcher.submit(stream)
+    dispatcher.pump()
+    blocked = dispatcher.submit(VERSION)
+    assert results[-1].request_id == blocked.request_id
+    assert results[-1].status is CommandStatus.BUSY
+    assert writes[-1] == b"Monitor\r\n"
+
+
+@pytest.mark.parametrize(
+    ("terminal", "expected"),
+    [
+        ("reply", CommandStatus.OK),
+        ("cancel", CommandStatus.CANCELLED),
+        ("disconnect", CommandStatus.DISCONNECTED),
+        ("user_disconnect", CommandStatus.CANCELLED),
+        ("timeout", CommandStatus.TIMEOUT),
+    ],
+)
+def test_each_ticket_finishes_once_across_terminal_paths(
+    terminal: str, expected: CommandStatus
+) -> None:
+    """Repeated terminal actions cannot duplicate a completion signal."""
+    dispatcher, registry, _, results, _, now = make_dispatcher()
+    registry.register(VERSION)
+    ticket = dispatcher.submit(VERSION)
+    dispatcher.pump()
+    if terminal == "reply":
+        dispatcher.receive_frame(b"Software version 1.02")
+    elif terminal == "cancel":
+        ticket.cancel()
+        dispatcher.pump()
+    elif terminal == "disconnect":
+        dispatcher.set_connected(False)
+    elif terminal == "user_disconnect":
+        dispatcher.set_connected(False, user_initiated=True)
+    else:
+        now[0] = 1.1
+        dispatcher.pump()
+    dispatcher.set_connected(False, user_initiated=True)
+    ticket.cancel()
+    dispatcher.pump()
+    assert len(results) == 1
+    assert results[0].request_id == ticket.request_id
+    assert results[0].status is expected
+
+
+def test_submit_does_not_wait_for_a_blocked_serial_write() -> None:
+    """A caller can enqueue while the transport owner is stuck in write."""
+    dispatcher, registry, _, _, _, _ = make_dispatcher()
+    nop = CommandSpec("Nop")
+    registry.register(nop)
+    write_started = threading.Event()
+    release_write = threading.Event()
+    submitted = threading.Event()
+
+    def blocked_write(data: bytes) -> int:
+        write_started.set()
+        assert release_write.wait(2)
+        return len(data)
+
+    dispatcher._write = blocked_write
+    dispatcher.submit(nop)
+    worker = threading.Thread(target=dispatcher.pump)
+    worker.start()
+    try:
+        assert write_started.wait(1)
+
+        def enqueue() -> None:
+            dispatcher.submit(nop)
+            submitted.set()
+
+        caller = threading.Thread(target=enqueue)
+        caller.start()
+        assert submitted.wait(0.2)
+        caller.join(1)
+    finally:
+        release_write.set()
+        worker.join(2)
+    assert not worker.is_alive()
+
+
+def test_tx_signal_integrates_with_m3_traffic_logger_once_per_send() -> None:
+    """A written request yields one traffic row with its resolved route."""
+    dispatcher, registry, _, _, _, _ = make_dispatcher()
+    registry.register(VERSION)
+    logger = TrafficLogger(LogConfig())
+    dispatcher.tx_written.connect(
+        lambda data, route, spec: logger.record_tx("COM11", data, route, spec)
+    )
+    try:
+        dispatcher.submit(VERSION)
+        dispatcher.pump()
+        dispatcher.receive_frame(b"Software version 1.02")
+        dispatcher.submit("Version\r\n")
+        dispatcher.pump()
+        dispatcher.receive_frame(b"Software version 1.75")
+        dispatcher.submit("Other")
+        dispatcher.pump()
+        records = logger.recent_records
+        assert len(records) == 3
+        routes = [
+            record.route.name if record.route else None for record in records
+        ]
+        assert routes == [
+            "SPEC",
+            "MATCHED",
+            "RAW",
+        ]
+        assert records[0].spec is VERSION
+        assert records[1].spec is VERSION
+        assert records[2].spec is None
+    finally:
+        logger.close()
+
+
+def test_one_hundred_concurrent_callers_keep_unique_results() -> None:
+    """Concurrent submitters preserve identity and a single write path."""
+    dispatcher, registry, writes, results, _, _ = make_dispatcher()
+    nop = CommandSpec("Nop")
+    registry.register(nop)
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        tickets = list(pool.map(lambda _: dispatcher.submit(nop), range(100)))
+    dispatcher.pump()
+    assert len(writes) == len(results) == len(tickets) == 100
+    assert len({ticket.request_id for ticket in tickets}) == 100
+    assert {result.request_id for result in results} == {
+        ticket.request_id for ticket in tickets
+    }
+    assert all(result.spec is nop for result in results)
+
+
+def test_random_terminal_sequences_finish_each_ticket_once() -> None:
+    """Random reply, cancel, timeout, and disconnect stay idempotent."""
+    rng = Random(7405)
+    actions = ("pump", "reply", "cancel", "timeout", "disconnect")
+    for _ in range(100):
+        dispatcher, registry, _, results, _, now = make_dispatcher()
+        registry.register(VERSION)
+        ticket = dispatcher.submit(VERSION)
+        for action in rng.choices(actions, k=6):
+            if action == "pump":
+                dispatcher.pump()
+            elif action == "reply":
+                dispatcher.receive_frame(b"Software version 1.02")
+            elif action == "cancel":
+                ticket.cancel()
+                dispatcher.pump()
+            elif action == "timeout":
+                now[0] += 1.1
+                dispatcher.pump()
+            else:
+                dispatcher.set_connected(False)
+        dispatcher.set_connected(False, user_initiated=True)
+        dispatcher.pump()
+        assert len(results) == 1
+        assert results[0].request_id == ticket.request_id

@@ -5,10 +5,11 @@ from __future__ import annotations
 from _thread import RLock as RLockType
 from codecs import lookup
 from collections import deque
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from threading import RLock
-from time import time
+from time import monotonic, time
 from uuid import uuid4
 
 from loguru import logger
@@ -48,6 +49,7 @@ class TrafficLogger(QObject):
         runtime: RuntimeConfig | None = None,
         *,
         encoding: str = "utf-8",
+        clock: Callable[[], float] = monotonic,
     ) -> None:
         """Create an in-memory logger without changing global loguru state."""
         super().__init__()
@@ -57,6 +59,11 @@ class TrafficLogger(QObject):
             maxlen=self._runtime.traffic_ring_size
         )
         self._records_lock: RLockType = RLock()
+        self._clock: Callable[[], float] = clock
+        self._pending_stream_records: dict[CommandSpec, TrafficRecord] = {}
+        self._last_stream_emit_at: float = (
+            clock() - self._runtime.stream_emit_interval_ms / 1000
+        )
         self._enabled: bool = self._config.enabled
         try:
             lookup(encoding)
@@ -135,16 +142,37 @@ class TrafficLogger(QObject):
         self._record(record, annotation)
         return record
 
-    def record_rx(self, port: str, data: bytes) -> TrafficRecord:
-        """Record one received frame."""
+    def record_rx(
+        self,
+        port: str,
+        data: bytes,
+        *,
+        stream_spec: CommandSpec | None = None,
+    ) -> TrafficRecord:
+        """Record a frame, coalescing high-rate stream UI notifications."""
         record = TrafficRecord(
             direction="RX",
             timestamp=time(),
             port=port,
             data=bytes(data),
+            spec=stream_spec,
         )
-        self._record(record, "-")
+        self._record(record, "-", stream_spec=stream_spec)
         return record
+
+    def flush_stream_traffic(self, *, force: bool = False) -> None:
+        """Emit the latest buffered record per stream at the interval."""
+        now = self._clock()
+        with self._records_lock:
+            if not force and now - self._last_stream_emit_at < (
+                self._runtime.stream_emit_interval_ms / 1000
+            ):
+                return
+            records = tuple(self._pending_stream_records.values())
+            self._pending_stream_records.clear()
+            self._last_stream_emit_at = now
+        for record in records:
+            self.traffic_logged.emit(record)
 
     def record_event(self, port: str, event: str) -> None:
         """Record one lifecycle event without adding it to the traffic ring."""
@@ -164,6 +192,7 @@ class TrafficLogger(QObject):
 
     def close(self) -> None:
         """Flush the manager and release its application shutdown hook."""
+        self.flush_stream_traffic(force=True)
         self.end_connection()
         self._manager.close()
 
@@ -172,11 +201,22 @@ class TrafficLogger(QObject):
         """Return whether this instance is allowed to emit loguru records."""
         return self._enabled
 
-    def _record(self, record: TrafficRecord, annotation: str) -> None:
+    def _record(
+        self,
+        record: TrafficRecord,
+        annotation: str,
+        *,
+        stream_spec: CommandSpec | None = None,
+    ) -> None:
         """Append, signal, and optionally log one traffic record."""
         with self._records_lock:
             self._records.append(record)
-        self.traffic_logged.emit(record)
+            if stream_spec is not None:
+                self._pending_stream_records[stream_spec] = record
+        if stream_spec is None:
+            self.traffic_logged.emit(record)
+        else:
+            self.flush_stream_traffic()
         if not self._manager_enabled:
             return
         spec_name = self._spec_name(record.spec)

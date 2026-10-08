@@ -8,9 +8,9 @@ from typing import TYPE_CHECKING, Any
 # PySide6 exposes these C++ types through generated bindings, which pylint
 # cannot resolve even though ty and Python imports can.
 # pylint: disable=no-name-in-module
-from PySide6.QtCore import QObject, QThread, Qt, Signal
-# pylint: enable=no-name-in-module
+from PySide6.QtCore import QObject, Qt, QThread, Signal
 
+# pylint: enable=no-name-in-module
 from ..enums import CommandStatus, ConnectionState
 from ..errors import CommandError
 from ..models import (
@@ -61,9 +61,15 @@ class SerialHandler(QObject):
         self._dispatcher: CommandDispatcher = CommandDispatcher(
             profile, self._registry, self._write_unavailable
         )
-        self._dispatcher.command_finished.connect(self.command_finished.emit)
-        self._dispatcher.event_received.connect(self.event_received.emit)
-        self._dispatcher.error_occurred.connect(self.error_occurred.emit)
+        self._dispatcher.command_finished.connect(
+            self.command_finished.emit, Qt.ConnectionType.DirectConnection
+        )
+        self._dispatcher.event_received.connect(
+            self.event_received.emit, Qt.ConnectionType.DirectConnection
+        )
+        self._dispatcher.error_occurred.connect(
+            self.error_occurred.emit, Qt.ConnectionType.DirectConnection
+        )
         self._init_sequence: tuple[CommandSpec | str, ...] = ()
 
     @staticmethod
@@ -103,16 +109,21 @@ class SerialHandler(QObject):
         for item in items:
             if isinstance(item, CommandSpec):
                 if not self._registry.contains(item):
-                    raise CommandError(f"init command {item.name!r} is not registered")
+                    raise CommandError(
+                        f"init command {item.name!r} is not registered"
+                    )
                 if item.placeholders:
                     raise CommandError(
-                        "init command with placeholders must be supplied as text"
+                        "init command with placeholders requires text"
                     )
             elif isinstance(item, str):
-                if self._registry.resolve_text(
-                    item, self._profile.terminator
-                ) is None:
-                    raise CommandError(f"init command text is not registered: {item!r}")
+                if (
+                    self._registry.resolve_text(item, self._profile.terminator)
+                    is None
+                ):
+                    raise CommandError(
+                        f"init command text is not registered: {item!r}"
+                    )
             else:
                 raise CommandError("init sequence accepts CommandSpec or str")
         self._init_sequence = tuple(items)
@@ -141,7 +152,7 @@ class SerialHandler(QObject):
     def send_and_wait(
         self, target: CommandSpec | str, /, *, timeout: float, **params: object
     ) -> CommandResult:
-        """Wait in a script thread, rejecting threads running a Qt event loop."""
+        """Wait in a script thread that has no running Qt event loop."""
         if QThread.currentThread().loopLevel() > 0:
             raise CommandError("send_and_wait cannot run in a Qt event loop")
         if timeout <= 0:
@@ -159,6 +170,7 @@ class SerialHandler(QObject):
             on_finished, Qt.ConnectionType.DirectConnection
         )
         try:
+            # ty: ignore[invalid-argument-type] -- send validates variadic parameters.
             ticket = self.send(target, **params)
             request_id = ticket.request_id
             if not any(

@@ -11,6 +11,8 @@ from ..enums import CommandPriority, SendRoute
 from ..models import CommandSpec
 
 
+# One invocation needs these independent timing and result fields.
+# pylint: disable=too-many-instance-attributes
 @dataclass(eq=False)
 class PendingCommand:
     """Keep per-invocation state while retaining the registered spec object."""

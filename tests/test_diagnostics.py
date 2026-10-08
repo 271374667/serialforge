@@ -1,4 +1,4 @@
-"""M3 diagnostics and log file contracts."""
+"""M3 diagnostics and M4 stream traffic contracts."""
 
 from __future__ import annotations
 
@@ -9,12 +9,41 @@ from typing import Any
 
 from loguru import logger
 
-from serialforge.advanced import RuntimeConfig
+from serialforge.advanced import RuntimeConfig, TrafficRecord
 from serialforge.diagnostics import TrafficLogger
 from serialforge.diagnostics import log_file_manager as log_files
-from serialforge.enums import SendRoute
+from serialforge.enums import ResponseMode, SendRoute
 from serialforge.errors import ConfigError
 from serialforge.models import CommandSpec, LogConfig
+
+
+def test_stream_signal_coalesces_per_spec_without_losing_history() -> None:
+    """Bound UI notifications while retaining each frame in the ring."""
+    now = [0.0]
+    traffic = TrafficLogger(
+        LogConfig(),
+        RuntimeConfig(stream_emit_interval_ms=50, traffic_ring_size=10),
+        clock=lambda: now[0],
+    )
+    first = CommandSpec("MonitorA", mode=ResponseMode.STREAM)
+    second = CommandSpec("MonitorB", mode=ResponseMode.STREAM)
+    emitted: list[TrafficRecord] = []
+    traffic.traffic_logged.connect(emitted.append)
+    try:
+        traffic.record_rx("COM11", b"A 1", stream_spec=first)
+        now[0] = 0.01
+        traffic.record_rx("COM11", b"A 2", stream_spec=first)
+        traffic.record_rx("COM11", b"B 1", stream_spec=second)
+        traffic.record_rx("COM11", b"A 3", stream_spec=first)
+        assert len(emitted) == 1
+        assert len(traffic.recent_records) == 4
+        now[0] = 0.06
+        traffic.flush_stream_traffic()
+        assert [record.data for record in emitted] == [b"A 1", b"A 3", b"B 1"]
+        assert emitted[1].spec is first
+        assert emitted[2].spec is second
+    finally:
+        traffic.close()
 
 
 def test_disabled_logger_is_silent_and_enabled_records_are_debug(

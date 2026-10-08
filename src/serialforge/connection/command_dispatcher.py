@@ -30,6 +30,8 @@ from .pending_command import PendingCommand
 from .response_parser import ResponseParser
 
 
+# One dispatcher owns the synchronized queue, in-flight state, and deadlines.
+# pylint: disable=too-many-instance-attributes
 class CommandDispatcher(QObject):
     """Run the M4 command state machine on a transport owner's thread.
 
@@ -63,6 +65,7 @@ class CommandDispatcher(QObject):
         self._queue: list[PendingCommand] = []
         self._inflight: list[PendingCommand] = []
         self._streams: list[PendingCommand] = []
+        self._writing_pending: PendingCommand | None = None
         self._sequence: int = 0
         self._connected: bool = False
         self._last_write_at: float | None = None
@@ -88,7 +91,10 @@ class CommandDispatcher(QObject):
                     if user_initiated
                     else CommandStatus.DISCONNECTED
                 )
-                for pending in tuple(self._queue + self._inflight + self._streams):
+                active = self._queue + self._inflight + self._streams
+                if self._writing_pending is not None:
+                    active.append(self._writing_pending)
+                for pending in tuple(active):
                     self._finish(pending, status)
                 self._drain_until = 0.0
                 self._latency.reset()
@@ -105,11 +111,16 @@ class CommandDispatcher(QObject):
     ) -> None:
         """Finish one accepted ticket immediately and at most once."""
         with self._lock:
-            for pending in self._queue + self._inflight + self._streams:
+            active = self._queue + self._inflight + self._streams
+            if self._writing_pending is not None:
+                active.append(self._writing_pending)
+            for pending in active:
                 if pending.ticket is ticket:
                     self._finish(pending, status)
                     return
 
+    # Validation must distinguish spec, matched text, and raw text paths.
+    # pylint: disable=too-many-branches
     def submit(
         self,
         target: CommandSpec | str,
@@ -195,7 +206,8 @@ class CommandDispatcher(QObject):
         expected = set(spec.placeholders)
         if set(params) != expected:
             raise CommandError(
-                f"request params must be {sorted(expected)}, got {sorted(params)}"
+                f"request params must be {sorted(expected)}, "
+                f"got {sorted(params)}"
             )
         values: dict[str, str] = {}
         for name, value in params.items():
@@ -219,48 +231,59 @@ class CommandDispatcher(QObject):
         CommandRegistry.validate_text(request.strip())
         return (request + terminator).encode(self._profile.encoding)
 
+    # Queue scheduling and three independent timeout kinds share one clock tick.
+    # pylint: disable=too-many-branches
     def pump(self) -> None:
         """Advance timeouts, cancellation, throttled events, and writes."""
-        with self._lock:
-            now = self._clock()
-            for pending in tuple(self._queue + self._inflight + self._streams):
-                if pending.ticket.cancelled:
-                    self._finish(pending, CommandStatus.CANCELLED)
-                    continue
-                if pending.started_at is None or pending.spec is None:
-                    continue
-                spec = pending.spec
-                elapsed = now - pending.started_at
-                if spec.total_timeout_s is not None and elapsed >= spec.total_timeout_s:
-                    self.timeout(pending, now)
-                elif (
-                    pending.first_frame_at is None
-                    and elapsed >= pending.timeout_s
-                    and spec.mode is not ResponseMode.STREAM
+        while True:
+            with self._lock:
+                if self._writing_pending is not None:
+                    return
+                now = self._clock()
+                for pending in tuple(
+                    self._queue + self._inflight + self._streams
                 ):
-                    self.timeout(pending, now)
-                elif (
-                    spec.mode is ResponseMode.MULTI
-                    and pending.last_frame_at is not None
-                    and now - pending.last_frame_at >= spec.idle_timeout_s
-                ):
-                    self._finish(pending, CommandStatus.OK)
-            if self._drain_until and now >= self._drain_until:
-                self._drain_until = 0.0
-                if self._clear_input is not None:
-                    self._clear_input()
-            interval = self._runtime.stream_emit_interval_ms / 1000
-            if now - self._last_event_emit_at >= interval:
-                self.flush_events()
-            while self._connected and self._queue:
+                    if pending.ticket.cancelled:
+                        self._finish(pending, CommandStatus.CANCELLED)
+                        continue
+                    if pending.started_at is None or pending.spec is None:
+                        continue
+                    spec = pending.spec
+                    elapsed = now - pending.started_at
+                    if (
+                        spec.total_timeout_s is not None
+                        and elapsed >= spec.total_timeout_s
+                    ):
+                        self.timeout(pending, now)
+                    elif (
+                        pending.first_frame_at is None
+                        and elapsed >= pending.timeout_s
+                        and spec.mode is not ResponseMode.STREAM
+                    ):
+                        self.timeout(pending, now)
+                    elif (
+                        spec.mode is ResponseMode.MULTI
+                        and pending.last_frame_at is not None
+                        and now - pending.last_frame_at >= spec.idle_timeout_s
+                    ):
+                        self._finish(pending, CommandStatus.OK)
+                if self._drain_until and now >= self._drain_until:
+                    self._drain_until = 0.0
+                    if self._clear_input is not None:
+                        self._clear_input()
+                interval = self._runtime.stream_emit_interval_ms / 1000
+                if now - self._last_event_emit_at >= interval:
+                    self.flush_events()
+                if not self._connected or not self._queue:
+                    return
                 if now < self._drain_until:
-                    break
+                    return
                 if (
                     self._last_write_at is not None
                     and now - self._last_write_at
                     < self._runtime.min_command_interval_s
                 ):
-                    break
+                    return
                 pending = self._queue[0]
                 spec = pending.spec
                 needs_reply = (
@@ -272,17 +295,29 @@ class CommandDispatcher(QObject):
                         and item.spec.correlation is Correlation.EXCLUSIVE
                         for item in self._inflight
                     )
-                    or (needs_reply and spec.correlation is Correlation.EXCLUSIVE)
+                    or (
+                        needs_reply
+                        and spec.correlation is Correlation.EXCLUSIVE
+                    )
                     or pending.route is SendRoute.RAW
                 ):
-                    break
+                    return
                 self._queue.pop(0)
+                self._writing_pending = pending
+            try:
                 self.start(pending, now)
-                if pending.finished:
-                    continue
-                if needs_reply and spec.correlation is Correlation.EXCLUSIVE:
-                    break
+            finally:
+                with self._lock:
+                    self._writing_pending = None
+            if (
+                needs_reply
+                and spec.correlation is Correlation.EXCLUSIVE
+                and not pending.finished
+            ):
+                return
 
+    # Route in strict order: in-flight, stream, event, raw multi, unknown.
+    # pylint: disable=too-many-branches,too-many-statements,too-many-return-statements
     def receive_frame(self, frame: bytes) -> None:
         """Associate a complete frame with an invocation or device event."""
         with self._lock:
@@ -291,7 +326,8 @@ class CommandDispatcher(QObject):
                 return
             text = frame.decode(self._profile.encoding, errors="replace")
             if self._profile.echo and any(
-                frame == item.sent.removesuffix(
+                frame
+                == item.sent.removesuffix(
                     self._profile.terminator.encode(self._profile.encoding)
                 )
                 for item in self._inflight + self._streams
@@ -402,7 +438,10 @@ class CommandDispatcher(QObject):
                     pending.last_frame_at = now
                     if pending.first_frame_at is None:
                         pending.first_frame_at = now
-                    if spec.count is not None and len(pending.values) >= spec.count:
+                    if (
+                        spec.count is not None
+                        and len(pending.values) >= spec.count
+                    ):
                         self._finish(pending, CommandStatus.OK)
                     return
             self.enqueue_event(
@@ -433,7 +472,11 @@ class CommandDispatcher(QObject):
         """Check correlation keys and turn parser errors into results."""
         text = frame.decode(self._profile.encoding, errors="replace")
         if spec.pattern is None:
-            return (True, text) if spec.mode is ResponseMode.STREAM else (False, None)
+            return (
+                (True, text)
+                if spec.mode is ResponseMode.STREAM
+                else (False, None)
+            )
         match = re.fullmatch(spec.pattern, text)
         if match is None:
             return False, None
@@ -451,45 +494,51 @@ class CommandDispatcher(QObject):
 
     def start(self, pending: PendingCommand, now: float) -> None:
         """Write one invocation and mark its response deadline."""
-        pending.started_at = now
-        spec = pending.spec
-        if spec is not None:
-            if spec.timeout_s is TimeoutPolicy.AUTO:
-                pending.timeout_s = self._auto_rto
-            else:
-                pending.timeout_s = float(spec.timeout_s)
+        with self._lock:
+            if pending.finished:
+                return
+            pending.started_at = now
+            spec = pending.spec
+            if spec is not None:
+                if spec.timeout_s is TimeoutPolicy.AUTO:
+                    pending.timeout_s = self._auto_rto
+                else:
+                    assert isinstance(spec.timeout_s, (int, float))
+                    pending.timeout_s = float(spec.timeout_s)
+                if spec.mode is ResponseMode.STREAM:
+                    self._streams.append(pending)
+                elif spec.mode is not ResponseMode.NO_REPLY:
+                    self._inflight.append(pending)
         try:
             written = self._write(pending.sent)
         except (OSError, RuntimeError) as exc:
-            self._finish(
-                pending,
-                CommandStatus.DISCONNECTED,
-                error_message=str(exc),
-            )
+            with self._lock:
+                self._finish(
+                    pending,
+                    CommandStatus.DISCONNECTED,
+                    error_message=str(exc),
+                )
             return
-        if written != len(pending.sent):
-            self._finish(
-                pending,
-                CommandStatus.DISCONNECTED,
-                error_message="serial write accepted fewer bytes than requested",
-            )
-            return
-        self._last_write_at = now
-        self.tx_written.emit(pending.sent, pending.route, spec)
-        if spec is None or spec.mode is ResponseMode.NO_REPLY:
-            self._finish(pending, CommandStatus.OK)
-        elif spec.mode is ResponseMode.STREAM:
-            self._streams.append(pending)
-        else:
-            self._inflight.append(pending)
+        with self._lock:
+            if written != len(pending.sent):
+                self._finish(
+                    pending,
+                    CommandStatus.DISCONNECTED,
+                    error_message="serial write accepted too few bytes",
+                )
+                return
+            self._last_write_at = now
+            self.tx_written.emit(pending.sent, pending.route, spec)
+            if pending.ticket.cancelled:
+                self._finish(pending, CommandStatus.CANCELLED)
+            elif spec is None or spec.mode is ResponseMode.NO_REPLY:
+                self._finish(pending, CommandStatus.OK)
 
     def timeout(self, pending: PendingCommand, now: float) -> None:
         """Finish an expired invocation and isolate late exclusive frames."""
         spec = pending.spec
         if spec is not None and spec.timeout_s is TimeoutPolicy.AUTO:
-            self._auto_rto = min(
-                self._runtime.rto_max_s, self._auto_rto * 2
-            )
+            self._auto_rto = min(self._runtime.rto_max_s, self._auto_rto * 2)
         if spec is not None and spec.correlation is Correlation.EXCLUSIVE:
             self._drain_until = now + self._runtime.post_timeout_drain_s
         self._finish(pending, CommandStatus.TIMEOUT)
@@ -516,9 +565,7 @@ class CommandDispatcher(QObject):
             and pending.spec is not None
             and pending.spec.mode is ResponseMode.SINGLE
         ):
-            self._latency.observe(
-                max(now - pending.started_at, 0.000001)
-            )
+            self._latency.observe(max(now - pending.started_at, 0.000001))
             estimate = self._latency.stats().rto_s
             if estimate is not None:
                 self._auto_rto = min(
@@ -553,6 +600,23 @@ class CommandDispatcher(QObject):
     def enqueue_event(self, event: DeviceEvent) -> None:
         """Retain bounded event traffic until the next emission interval."""
         if len(self._events) >= self._runtime.event_queue_high_water:
+            if isinstance(event.spec, CommandSpec):
+                for index, queued in enumerate(self._events):
+                    if queued.spec is event.spec:
+                        del self._events[index]
+                        self._dropped_events += 1
+                        break
+                else:
+                    for index, queued in enumerate(self._events):
+                        if isinstance(queued.spec, CommandSpec):
+                            del self._events[index]
+                            self._dropped_events += 1
+                            break
+                    else:
+                        self._dropped_events += 1
+                        return
+                self._events.append(event)
+                return
             for index, queued in enumerate(self._events):
                 if isinstance(queued.spec, CommandSpec):
                     del self._events[index]

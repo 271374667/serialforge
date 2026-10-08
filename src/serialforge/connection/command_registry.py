@@ -27,7 +27,7 @@ class CommandRegistry:
     _terminator: str
 
     def __init__(self, terminator: str = "\r\n") -> None:
-        """Create an empty registry without declaring device-specific commands."""
+        """Create an empty registry without device-specific commands."""
         self._lock = threading.RLock()
         self._terminator = terminator
         self._snapshot = ((), (), MappingProxyType({}), ())
@@ -68,7 +68,9 @@ class CommandRegistry:
                     if spec not in events:
                         events.append(spec)
                 else:
-                    raise CommandError("register accepts CommandSpec or EventSpec")
+                    raise CommandError(
+                        "register accepts CommandSpec or EventSpec"
+                    )
             self._publish(commands, events)
 
     def unregister(self, spec: CommandSpec | EventSpec) -> None:
@@ -76,9 +78,7 @@ class CommandRegistry:
         with self._lock:
             if not self.contains(spec):
                 return
-            commands = [
-                item for item in self._snapshot[0] if item is not spec
-            ]
+            commands = [item for item in self._snapshot[0] if item is not spec]
             events = [item for item in self._snapshot[1] if item is not spec]
             self._publish(commands, events)
 
@@ -103,9 +103,7 @@ class CommandRegistry:
         patterns: set[str] = set()
         for spec in events:
             if spec.pattern in patterns:
-                raise CommandError(
-                    f"duplicate event pattern: {spec.pattern!r}"
-                )
+                raise CommandError(f"duplicate event pattern: {spec.pattern!r}")
             patterns.add(spec.pattern)
         self._snapshot = (
             tuple(commands),
@@ -160,7 +158,9 @@ class CommandRegistry:
     def validate_text(text: str) -> None:
         """Reject embedded controls that could inject another command."""
         if not text or any(ord(char) < 32 or ord(char) == 127 for char in text):
-            raise CommandError("command text is empty or contains control characters")
+            raise CommandError(
+                "command text is empty or contains control characters"
+            )
 
     @staticmethod
     def template_skeleton(request: str) -> str:

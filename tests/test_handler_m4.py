@@ -1,13 +1,15 @@
 """M4 facade contracts before M5 establishes a serial connection."""
 
+import threading
+import time
+
 import pytest
 from PySide6.QtCore import QCoreApplication, QTimer
 
-from serialforge import CommandSpec, CommandStatus, DeviceProfile
+from serialforge import CommandResult, CommandSpec, CommandStatus, DeviceProfile
 from serialforge.advanced import CommandTicket
 from serialforge.connection import SerialHandler
 from serialforge.errors import CommandError
-
 
 VERSION = CommandSpec("Version", r"Software version (?P<version>\S+)")
 
@@ -31,7 +33,7 @@ def test_register_init_sequence_and_disconnected_send() -> None:
     handler.set_init_sequence([VERSION, "Version\r\n"])
     with pytest.raises(CommandError, match="not registered"):
         handler.set_init_sequence(["Unknown"])
-    results: list[object] = []
+    results: list[CommandResult] = []
     handler.command_finished.connect(results.append)
     ticket = handler.send("Version")
     assert isinstance(ticket, CommandTicket)
@@ -73,3 +75,36 @@ def test_send_and_wait_rejects_qt_event_loop_thread() -> None:
     app.exec()
     assert len(errors) == 1
     assert "event loop" in str(errors[0])
+
+
+def test_send_and_wait_from_script_thread_receives_worker_result() -> None:
+    """A worker can finish the command while the script thread is waiting."""
+    handler = make_handler()
+    handler.register(VERSION)
+    sent = threading.Event()
+
+    def write(data: bytes) -> int:
+        sent.set()
+        return len(data)
+
+    handler._dispatcher._write = write
+    handler._dispatcher.set_connected(True)
+
+    def worker() -> None:
+        deadline = time.monotonic() + 1
+        while time.monotonic() < deadline and not sent.is_set():
+            handler._dispatcher.pump()
+            time.sleep(0.005)
+        if sent.is_set():
+            handler._dispatcher.receive_frame(b"Software version 1.02")
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    try:
+        result = handler.send_and_wait(VERSION, timeout=1)
+    finally:
+        thread.join(2)
+    assert not thread.is_alive()
+    assert result.status is CommandStatus.OK
+    assert result.spec is VERSION
+    assert result.data == {"version": "1.02"}

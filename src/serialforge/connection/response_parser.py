@@ -11,13 +11,15 @@ from ..errors import CommandError
 from ..models import CommandSpec, EventSpec
 
 
+# Parsing branches correspond to the public result data-shape table.
+# pylint: disable=too-few-public-methods
 class ResponseParser:
     """Apply a declaration's pattern and optional result conversion."""
 
+    # Each shape returns its own data type or a contextual conversion error.
+    # pylint: disable=too-many-branches,too-many-return-statements
     @staticmethod
-    def match(
-        spec: CommandSpec | EventSpec, text: str
-    ) -> tuple[bool, Any]:
+    def match(spec: CommandSpec | EventSpec, text: str) -> tuple[bool, Any]:
         """Return whether a frame matches and its parsed data.
 
         Args:
@@ -31,11 +33,13 @@ class ResponseParser:
             CommandError: If a matched frame cannot be converted.
         """
         if spec.pattern is None:
-            if isinstance(spec, CommandSpec) and spec.parser is not None:
+            if spec.parser is not None:
                 try:
                     return True, spec.parser(text)
                 except (ValueError, TypeError) as exc:
-                    raise CommandError(f"response parser failed: {exc}") from exc
+                    raise CommandError(
+                        f"response parser failed: {exc}"
+                    ) from exc
             return True, text
         match = re.fullmatch(spec.pattern, text)
         if match is None:
@@ -50,11 +54,15 @@ class ResponseParser:
         if result_type is None:
             return True, captures if captures else match.group(0)
         if result_type in {str, int, float}:
-            value = next(iter(captures.values())) if captures else match.group(0)
+            value = (
+                next(iter(captures.values())) if captures else match.group(0)
+            )
             try:
                 return True, result_type(value)
             except (ValueError, TypeError) as exc:
-                raise CommandError(f"response conversion failed: {exc}") from exc
+                raise CommandError(
+                    f"response conversion failed: {exc}"
+                ) from exc
         if not is_dataclass(result_type):
             raise CommandError("result_type must be a scalar or dataclass")
         hints = get_type_hints(result_type)
