@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import json
 import os
 import shutil
 import subprocess
@@ -208,24 +207,19 @@ def lowest() -> None:
         )
         env = environment()
         env["UV_PROJECT_ENVIRONMENT"] = str(directory / ".venv")
-        config = directory / "uv.toml"
-        config.write_text(
-            "constraint-dependencies = "
-            + json.dumps(development_constraints())
-            + "\n",
-            encoding="utf-8",
-        )
         run(
             [
                 "uv",
-                "sync",
-                "--python",
-                "3.11",
-                "--resolution",
-                "lowest-direct",
-                "--config-file",
-                str(config),
+                "add",
+                "--dev",
+                "--frozen",
+                *development_constraints(),
             ],
+            cwd=directory,
+            env=env,
+        )
+        run(
+            ["uv", "sync", "--python", "3.11", "--resolution", "lowest-direct"],
             cwd=directory,
             env=env,
         )
