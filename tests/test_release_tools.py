@@ -38,6 +38,37 @@ def test_ci_propagates_subprocess_failure(
     assert error.value.code == 17
 
 
+def test_lowest_keeps_dev_versions_without_constraining_runtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Do not resolve Python 2 dev tools or pin away runtime lower bounds."""
+    lock = tmp_path / "uv.lock"
+    lock.write_text(
+        """[[package]]
+name = "serialforge"
+version = "0.0.1"
+[package.dev-dependencies]
+dev = [{ name = "pylint" }, { name = "pytest" }]
+[[package]]
+name = "pylint"
+version = "4.1.1"
+[[package]]
+name = "pytest"
+version = "9.1.1"
+[[package]]
+name = "pyserial"
+version = "3.5"
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(ci, "ROOT", tmp_path)
+    assert set(ci.development_constraints()) == {
+        "pylint==4.1.1",
+        "pytest==9.1.1",
+    }
+
+
 def test_release_dry_run_never_calls_publish(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

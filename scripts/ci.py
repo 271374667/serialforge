@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import os
 import shutil
 import subprocess
 import sys
 import tarfile
 import tempfile
+import tomllib
 from pathlib import Path
 from zipfile import ZipFile
 
@@ -168,8 +170,34 @@ def matrix() -> None:
         run(["uv", "run", "--python", version, "--no-sync", "pytest"], env=env)
 
 
+def development_constraints() -> list[str]:
+    """Keep locked development tools while lowering runtime dependencies."""
+    lock = tomllib.loads((ROOT / "uv.lock").read_text(encoding="utf-8"))
+    project = next(
+        package
+        for package in lock["package"]
+        if package["name"] == "serialforge"
+    )
+    names = {
+        dependency["name"]
+        for dependency in project["dev-dependencies"]["dev"]
+    }
+    constraints: list[str] = []
+    for package in lock["package"]:
+        if package["name"] not in names:
+            continue
+        requirement = f"{package['name']}=={package['version']}"
+        markers = package.get("resolution-markers", [])
+        if markers:
+            requirement += "; " + " or ".join(
+                f"({marker})" for marker in markers
+            )
+        constraints.append(requirement)
+    return constraints
+
+
 def lowest() -> None:
-    """Validate the lowest direct dependency set in a disposable project."""
+    """Validate the lowest runtime dependencies with locked dev tools."""
     TEMP_DIR.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=TEMP_DIR, prefix="lowest-") as raw:
         directory = Path(raw)
@@ -181,8 +209,24 @@ def lowest() -> None:
         )
         env = environment()
         env["UV_PROJECT_ENVIRONMENT"] = str(directory / ".venv")
+        config = directory / "uv.toml"
+        config.write_text(
+            "constraint-dependencies = "
+            + json.dumps(development_constraints())
+            + "\n",
+            encoding="utf-8",
+        )
         run(
-            ["uv", "sync", "--python", "3.11", "--resolution", "lowest-direct"],
+            [
+                "uv",
+                "sync",
+                "--python",
+                "3.11",
+                "--resolution",
+                "lowest-direct",
+                "--config-file",
+                str(config),
+            ],
             cwd=directory,
             env=env,
         )
