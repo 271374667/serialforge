@@ -133,7 +133,8 @@ MULTI，STREAM 必须显式指定。异常子类在 `serialforge.errors`。
 ## Windows 范围
 
 支持 Windows 10/11 x64 和 64 位 Python。睡眠唤醒、USB 选择性挂起、驱动 DTR/RTS
-脉冲、拔插重连和 TX-RX 回环必须按 [docs/windows_verification.md](docs/windows_verification.md)
+脉冲、拔插重连和 TX-RX 回环必须按
+[.agents/docs/knowledge/software/0003_Windows真机验证矩阵.md](.agents/docs/knowledge/software/0003_Windows真机验证矩阵.md)
 中的矩阵由使用方验证；当前仓库没有宣称整张矩阵通过。PyInstaller 使用方还需自行
 履行 PySide6 LGPL 合规义务。遇到挂起导致的掉线，可以检查 Windows 的 USB 选择性
 暂停和设备电源管理选项；库不会修改系统设置。日志和波特率缓存使用 Qt 应用数据目录，
@@ -150,7 +151,8 @@ uv run python scripts/ci.py
 完整本地 CI 包含 Python 3.11–3.14 独立环境、格式、ty、pytest、pylint、构建、
 twine 和干净 wheel 冒烟。`--lowest` 单独验证最低直接依赖；`--release` 包含全部检查。
 `--smoke --wheel <路径> --python 3.11` 可在另一台机器对已构建 wheel 验收。
-发布流程见 [docs/RELEASING.md](docs/RELEASING.md)。
+发布流程见
+[.agents/docs/knowledge/software/0002_发布流程.md](.agents/docs/knowledge/software/0002_发布流程.md)。
 本项目不生成云端 CI，不执行 PyPI 上传、推送或打 tag。
 
 设计契约见 `串口通讯模块_方案_v10定稿.md`，AI 协作入口见 `AGENTS.md`。

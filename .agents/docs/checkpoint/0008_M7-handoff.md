@@ -24,7 +24,8 @@
 
 ## 进行中（下一步从这里继续）
 
-- 软件交付已提交到 dev；接下来补齐 docs/windows_verification.md 的 Windows 10/11 与至少两种芯片真机矩阵。
+- 软件交付已提交到 dev；接下来补齐 `.agents/docs/knowledge/software/0003_Windows真机验证矩阵.md`
+  的 Windows 10/11 与至少两种芯片真机矩阵。
 - 当前环境缺少完整矩阵所需机器、芯片和接线条件；任务仍激活，不以模拟测试代替真机验收。
 
 ## 待办
