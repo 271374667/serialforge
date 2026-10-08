@@ -12,7 +12,7 @@
 | 入口 | `src/serialforge/__init__.py`；开发脚本在 `scripts/` |
 | 构建 | `uv build` |
 | 测试 | `uv run pytest`；阶段 CI 为 `uv run python scripts/ci.py` |
-| 当前阶段 | M3 实现与阶段验证完成；等待确认进入 M4 命令调度与注册表 |
+| 当前阶段 | M4 实现与阶段验证完成；等待确认进入 M5 连接门面 |
 | 架构总览 | `.agents/ARCHITECTURE.md`（第 1、2、3、6 节为每次必读区，≤150 行） |
 
 目录重点：`src/serialforge/` 是源码，`tests/` 是测试，`examples/` 放使用方命令示例，`.agents/` 放项目规范与交接文档；本 skill 不复制进项目技能目录。
