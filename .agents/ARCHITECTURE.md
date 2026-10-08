@@ -1,7 +1,7 @@
 # serialforge · 架构总览
 
-> 类型: 活文档（原地更新，不编号、不归档）  |  最后更新: 2026-09-30
-> 基线 commit: 40ab7e7（M2 已完成，等待阶段确认）  |  适用版本: 0.0.1
+> 类型: 活文档（原地更新，不编号、不归档）  |  最后更新: 2026-10-08
+> 基线 commit: 526ac6f（M4 已完成；无结束符回复已纳入传输层契约，M5 待实现）  |  适用版本: 0.0.1
 > 形态: 完整  |  维护: AI 更新（见 `.agents/rules/15_architecture_doc.md`）
 > 读法: 第 1、2、3、6 节为必读区（每次会话读，合计 ≤150 行）；其余按需读
 
@@ -28,9 +28,9 @@
 | `src/serialforge/protocols.py` | 后端与传输协议 | 定义层 | 内部协议 | models | transport/discovery/connection |
 | `src/serialforge/advanced.py` | 进阶配置和统计再导出 | 再出口 | `advanced.__all__` | 定义层 | 使用方与实现层 |
 | `src/serialforge/transport/` | 字节流、定界、校验、延迟与端口后端 | `__init__.py`：M2 传输组件 | 内部模块 | L0 | discovery/connection/testing |
-| `src/serialforge/connection/` | handler、注册表、调度、重连 | M4/M5 实现 | 顶层门面 | L0-L2 | `__init__.py` |
+| `src/serialforge/connection/` | 命令注册、响应解析与调度；连接生命周期待 M5 | `command_registry.py:CommandRegistry`、`command_dispatcher.py:CommandDispatcher`、`serial_handler.py:SerialHandler` | 顶层门面与内部调度组件 | L0-L2 | `__init__.py` |
 | `src/serialforge/discovery/` | 扫描、探测、缓存 | M6 实现 | `DeviceFinder` | L0-L1 | connection/顶层 |
-| `src/serialforge/diagnostics/` | 流量与文件日志 | M3 实现 | advanced 记录类型 | L0-L1 | connection |
+| `src/serialforge/diagnostics/` | 流量与文件日志 | `traffic_logger.py:TrafficLogger`、`log_file_manager.py:LogFileManager` | 内部诊断组件 | L0-L1 | connection |
 | `src/serialforge/testing/` | 可脚本化假后端与模拟设备 | `__init__.py`：M2 假后端组件 | testing 命名空间 | L0-L1 | tests/使用方 |
 | `tests/` | 契约、守卫、单元和 API 快照 | `test_*.py` | 本地验证 | src | CI |
 
@@ -50,6 +50,7 @@
 
 - 顶层 `__all__` 恰为设计文档的 15 个名字 —— **违反**：破坏公共 API 预算和快照 —— **生效范围**：`src/serialforge/__init__.py`。
 - `CommandSpec` / `EventSpec` 是 `frozen=True, eq=False` 且全链路保留同一对象 —— **违反**：`result.spec is X` 失效 —— **生效范围**：models、registry、dispatcher、Qt 信号。
+- 发送终止符与接收定界相互独立；无结束符回复使用显式正数 `silence_gap_s` 的 `SILENCE_GAP`，接收循环须在无新字节时周期性 `flush()` —— **违反**：半包误判或命令永不完成 —— **生效范围**：advanced、transport、M5 connection、M6 discovery。
 - 定义层不导入实现子包，跨子包只经 `__init__.py` —— **违反**：循环依赖和架构守卫失败 —— **生效范围**：`src/serialforge/`。
 - 库内只使用 loguru DEBUG 且默认静默 —— **违反**：宿主应用收到意外输出或等级 —— **生效范围**：diagnostics 与 connection。
 - 不在源码定义业务 `CommandSpec` / `EventSpec` —— **违反**：库无法复用于不同设备 —— **生效范围**：`src/serialforge/`。
@@ -70,5 +71,9 @@
 
 | 日期 | commit | 改了什么 |
 | --- | --- | --- |
-| 2026-10-01 | 40ab7e7 | M2 传输基础设施、假后端和规范化迁移已提交；等待阶段确认 |
+| 2026-10-08 | 526ac6f | 明确支持无结束符回复的静默定界，校验间隔并覆盖分片和动态版本号 |
+| 2026-10-08 | 393c7b9 | M4 调度边界、并发写锁与流量信号背压完成；真机版本查询通过 |
+| 2026-10-08 | 222044c | M4 增加注册表、响应解析、调度器及 handler 的注册发送入口 |
+| 2026-10-08 | 1716749 | 同步 M3 已完成的诊断模块与阶段状态；等待确认进入 M4 |
+| 2026-10-01 | 40ab7e7 | M2 传输基础设施、假后端和规范化迁移已提交 |
 | 2026-09-30 | 98ba269 | 完成 M1 定义层与规范目录；进入 M2 传输层开发 |

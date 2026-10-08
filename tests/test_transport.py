@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import pytest
+
 from serialforge.advanced import FramingConfig, ReadLoopConfig
 from serialforge.enums import Checksum, FramingMode
-from serialforge.errors import FramingError, PortBusyError
+from serialforge.errors import ConfigError, FramingError, PortBusyError
 from serialforge.testing import FakeBackend, SimulatedDevice, use_fake_backend
 from serialforge.transport import (
     ChecksumCalculator,
@@ -51,6 +53,30 @@ def test_length_prefix_and_silence_gap() -> None:
     assert splitter.flush() == []
     now[0] = 0.1
     assert splitter.flush() == [b"abc"]
+
+
+def test_silence_gap_joins_fragmented_reply_without_terminator() -> None:
+    now = [0.0]
+    splitter = FrameSplitter(
+        FramingConfig(mode=FramingMode.SILENCE_GAP, silence_gap_s=0.08),
+        clock=lambda: now[0],
+    )
+    assert splitter.feed(b"Software ver") == []
+    now[0] = 0.04
+    assert splitter.flush() == []
+    assert splitter.feed(b"sion 1.75") == []
+    now[0] = 0.119
+    assert splitter.flush() == []
+    now[0] = 0.121
+    assert splitter.flush() == [b"Software version 1.75"]
+    assert splitter.flush() == []
+
+
+def test_silence_gap_requires_explicit_positive_interval() -> None:
+    with pytest.raises(ConfigError, match="requires silence_gap_s"):
+        FramingConfig(mode=FramingMode.SILENCE_GAP)
+    with pytest.raises(ConfigError, match="silence_gap_s must be positive"):
+        FramingConfig(mode=FramingMode.SILENCE_GAP, silence_gap_s=0)
 
 
 def test_frame_buffer_limit_raises_and_keeps_bounded_state() -> None:

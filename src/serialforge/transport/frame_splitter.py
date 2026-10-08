@@ -52,7 +52,10 @@ class FrameSplitter:
         if not self._buffer or self._last_byte_at is None:
             return []
         current = self._clock() if now is None else now
-        if current - self._last_byte_at < (self._config.silence_gap_s or 0.0):
+        gap = self._config.silence_gap_s
+        # FramingConfig validates SILENCE_GAP at construction.
+        assert gap is not None
+        if current - self._last_byte_at < gap:
             return []
         frame = bytes(self._buffer)
         self._buffer.clear()

@@ -107,6 +107,8 @@ class FramingConfig:
         """Validate framing boundaries."""
         if self.mode is FramingMode.LINE and not self.terminator:
             raise ConfigError("LINE framing requires a non-empty terminator")
+        if self.mode is FramingMode.SILENCE_GAP and self.silence_gap_s is None:
+            raise ConfigError("SILENCE_GAP framing requires silence_gap_s")
         if self.length_offset < 0 or self.length_size <= 0:
             raise ConfigError("length_offset and length_size must be positive")
         if self.byteorder not in {"little", "big"}:
