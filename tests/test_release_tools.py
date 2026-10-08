@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import io
+import shutil
 import subprocess
+import tomllib
 from pathlib import Path
 from zipfile import ZipFile
 
@@ -67,6 +69,70 @@ version = "3.5"
         "pylint==4.1.1",
         "pytest==9.1.1",
     }
+
+
+def test_lowest_edits_only_the_disposable_dev_group(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Use the real uv metadata editor without locking or installing tools."""
+    root = tmp_path / "checkout"
+    root.mkdir()
+    (root / "src").mkdir()
+    project = root / "pyproject.toml"
+    original = """[project]
+name = "serialforge"
+version = "0.0.1"
+requires-python = ">=3.11"
+dependencies = ["pyserial>=3.5"]
+[dependency-groups]
+dev = ["pytest"]
+"""
+    project.write_text(original, encoding="utf-8")
+    checked: list[Path] = []
+
+    def copy_inputs(destination: Path) -> None:
+        shutil.copy2(project, destination / "pyproject.toml")
+
+    def constraints() -> list[str]:
+        return ["pytest==9.1.1"]
+
+    def validate(
+        command: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str] | None = None,
+    ) -> None:
+        if command[1] == "add":
+            subprocess.run(
+                command,
+                cwd=cwd,
+                env=env,
+                check=True,
+                capture_output=True,
+                timeout=30,
+            )
+            assert not (cwd / "uv.lock").exists()
+            assert not (cwd / ".venv").exists()
+        elif command[1] == "sync":
+            metadata = tomllib.loads(
+                (cwd / "pyproject.toml").read_text(encoding="utf-8")
+            )
+            assert metadata["dependency-groups"]["dev"] == ["pytest==9.1.1"]
+            assert metadata["project"]["dependencies"] == ["pyserial>=3.5"]
+            assert "lowest-direct" in command
+            checked.append(cwd)
+
+    monkeypatch.setattr(ci, "ROOT", root)
+    monkeypatch.setattr(ci, "TEMP_DIR", tmp_path / "work")
+    monkeypatch.setattr(ci, "copy_validation_inputs", copy_inputs)
+    monkeypatch.setattr(ci, "development_constraints", constraints)
+    monkeypatch.setattr(ci, "run", validate)
+    ci.lowest()
+    assert len(checked) == 1
+    assert project.read_text(encoding="utf-8") == original
+    assert not (root / "uv.lock").exists()
+    assert not checked[0].exists()
 
 
 def test_release_dry_run_never_calls_publish(
