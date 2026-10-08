@@ -7,3 +7,4 @@
 - 增加默认跳过的 `hardware` 回环测试；未验证的系统、芯片和电源管理组合保持明确标记。
 - 统一绝对导入；测试替身移至 `tests/support/`，移除 `serialforge.testing`，wheel 和 sdist 不包含测试组件。
 - 修复生产线程对开发专用 `typing_extensions` 的依赖，支持只有声明运行依赖的干净 wheel 环境。
+- 最低依赖实测发现旧版 Qt 信号连接与 `SerialHandler.connect()` 冲突；将 PySide6-Essentials 下限收紧至完整套件通过的 6.11.2，pyserial 3.5 与 loguru 0.7.0 保持通过。

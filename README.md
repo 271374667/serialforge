@@ -6,7 +6,9 @@
 QtCore 的信号、槽和线程，提供设备发现、命令调度、自动重连和流量日志。
 库不包含任何具体设备业务命令，业务命令由使用方声明。
 
-支持 Python 3.11–3.14、`PySide6-Essentials`、`pyserial` 和 `loguru`。导入
+支持 Python 3.11–3.14、`PySide6-Essentials>=6.11.2`、`pyserial>=3.5` 和
+`loguru>=0.7`。较旧 Qt 绑定的信号连接存在与业务 `connect()` 的名称冲突；6.11.2
+是本次通过完整套件的保守下限，不表示所有中间版本都已逐一验证。导入
 `serialforge` 不会创建 Qt 应用、线程、文件或日志 sink。
 
 ## 最小示例

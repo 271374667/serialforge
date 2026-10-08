@@ -1,7 +1,7 @@
 # serialforge · 架构总览
 
 > 类型: 活文档（原地更新，不编号、不归档）  |  最后更新: 2026-10-08
-> 基线 commit: 84fa007（绝对导入与测试替身隔离；本次补充 M7 交付工具）  |  适用版本: 0.0.1
+> 基线 commit: 650b8a8（M7 交付工具；本次补充实测 Qt 依赖下限）  |  适用版本: 0.0.1
 > 形态: 完整  |  维护: AI 更新（见 `.agents/rules/15_architecture_doc.md`）
 > 读法: 第 1、2、3、6 节为必读区（每次会话读，合计 ≤150 行）；其余按需读
 
@@ -15,7 +15,7 @@
 
 - 交付物：可构建的 Python 库 `serialforge` 与本地 CI 脚本；无硬件 Demo 放在 `examples/`，测试替身放在 `tests/support/`，不进入发布 wheel。
 - 运行方式：使用方 `from serialforge import ...`；业务命令运行时声明并注册；Qt 应用提供 `QCoreApplication` 事件循环。
-- 关键依赖：Python >=3.11；`PySide6-Essentials`（只用 QtCore）、`pyserial`、`loguru`；uv + hatchling 构建。
+- 关键依赖：Python >=3.11；`PySide6-Essentials>=6.11.2`（只用 QtCore）、`pyserial>=3.5`、`loguru>=0.7`；uv + hatchling 构建。Qt 下限取本次完整套件通过的保守值，旧版存在 connect 名称冲突。
 
 ## 3. 模块地图（必读）
 
@@ -45,7 +45,7 @@
 
 - 外部 I/O：M2 起由 pyserial 访问串口；QtCore 负责线程与信号；loguru 在 M3 接入。
 - 配置：人写的工具配置保留根目录 `pyproject.toml`；运行时日志、缓存和状态按项目规则进入 `data/` 或用户目录。
-- 本地 CI：默认全量检查、独立 Python 3.11–3.14 矩阵、构建/twine 与外置 wheel 验收；`--fast` 单版本，`--lowest` 临时副本解析最低依赖，`--smoke` 验收已构建 wheel，`--release` 覆盖全部。实际验证结果见当前 checkpoint，uv.lock 必须保持不变。
+- 本地 CI：默认全量检查、独立 Python 3.11–3.14 矩阵、构建/twine 与外置 wheel 验收；`--fast` 单版本，`--lowest` 由 uv 在临时副本固定锁定的开发工具、解析最低运行依赖，`--smoke` 验收已构建 wheel，`--release` 覆盖全部。CI 不得改动仓库 uv.lock；正式依赖范围变更必须同步锁文件。
 - 发布：构建物统一进入 `outputs/01_dist/`；scripts/release.py 默认 dry-run，先要求干净工作区并执行发布前 CI。维护者上传要求显式参数和交互确认，AI 不执行上传、push 或 tag。
 
 ## 6. 关键不变量（必读，最容易改错的地方）
@@ -74,6 +74,7 @@
 
 | 日期 | commit | 改了什么 |
 | --- | --- | --- |
+| 2026-10-08 | 本次提交 | 最低组合 99 项通过；Qt 下限收紧至实测 6.11.2，临时副本固定开发工具后解析最低运行依赖 |
 | 2026-10-08 | 本次提交 | 补齐外置 Demo/README、独立 CI 和 release dry-run；干净 wheel 导入、Demo 及测试通过 |
 | 2026-10-08 | 本次提交 | 统一绝对导入，将测试替身移至 tests/support，并禁止测试内容进入 wheel/sdist |
 | 2026-10-08 | 4d253a0 | 交接核对交付边界：Demo、完整文档、Python 矩阵和干净 wheel 环境仍待 M7 |

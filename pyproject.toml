@@ -12,7 +12,7 @@ license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = [
     "loguru>=0.7",
-    "PySide6-Essentials>=6.5",
+    "PySide6-Essentials>=6.11.2",
     "pyserial>=3.5",
 ]
 classifiers = [
