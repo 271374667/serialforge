@@ -146,6 +146,8 @@ def smoke(wheel: Path, version: str) -> None:
                 "pytest",
                 "--with",
                 "pytest-qt",
+                "--with",
+                "pytest-xdist>=3.8.0",
                 "python",
                 "-m",
                 "pytest",

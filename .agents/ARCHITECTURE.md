@@ -1,7 +1,7 @@
 # serialforge · 架构总览
 
 > 类型: 活文档（原地更新，不编号、不归档）  |  最后更新: 2026-10-08
-> 基线 commit: 112c954（M7 交付工具与实测 Qt 依赖下限）  |  适用版本: 0.0.1
+> 基线 commit: 559c714（M7 软件验收；本次接入开发专用 pytest-xdist）  |  适用版本: 0.0.1
 > 形态: 完整  |  维护: AI 更新（见 `.agents/rules/15_architecture_doc.md`）
 > 读法: 第 1、2、3、6 节为必读区（每次会话读，合计 ≤150 行）；其余按需读
 
@@ -45,7 +45,7 @@
 
 - 外部 I/O：M2 起由 pyserial 访问串口；QtCore 负责线程与信号；loguru 在 M3 接入。
 - 配置：人写的工具配置保留根目录 `pyproject.toml`；运行时日志、缓存和状态按项目规则进入 `data/` 或用户目录。
-- 本地 CI：默认全量检查、独立 Python 3.11–3.14 矩阵、构建/twine 与外置 wheel 验收；`--fast` 单版本，`--lowest` 由 uv 在临时副本固定锁定的开发工具、解析最低运行依赖，`--smoke` 验收已构建 wheel，`--release` 覆盖全部。CI 不得改动仓库 uv.lock；正式依赖范围变更必须同步锁文件。
+- 本地 CI：默认全量检查、独立 Python 3.11–3.14 矩阵、构建/twine 与外置 wheel 验收；pytest 默认由开发专用 pytest-xdist 自动选择最多 4 个 worker（worksteal），`-n 0` 串行调试，`-m hardware` 强制串行。`--fast` 单版本，`--lowest` 在临时副本固定开发工具后解析最低运行依赖，`--smoke` 验收已构建 wheel，`--release` 覆盖全部。CI 不得改动仓库 uv.lock。
 - 发布：构建物统一进入 `outputs/01_dist/`；scripts/release.py 默认 dry-run，先要求干净工作区并执行发布前 CI。维护者上传要求显式参数和交互确认，AI 不执行上传、push 或 tag。
 
 ## 6. 关键不变量（必读，最容易改错的地方）
@@ -74,7 +74,8 @@
 
 | 日期 | commit | 改了什么 |
 | --- | --- | --- |
-| 2026-10-08 | 本次提交 | 完整发布前 CI 通过，Python 3.11–3.14、干净 wheel、最低组合均 99 项通过；真机矩阵仍待验收 |
+| 2026-10-08 | 本次提交 | pytest-xdist 仅作开发依赖；软件测试默认最多 4 个 worker，硬件选择在调度前强制串行，wheel 验收环境同步插件 |
+| 2026-10-08 | 559c714 | 完整发布前 CI 通过，Python 3.11–3.14、干净 wheel、最低组合均 99 项通过；真机矩阵仍待验收 |
 | 2026-10-08 | 112c954 | 最低组合 99 项通过；Qt 下限收紧至实测 6.11.2，临时副本固定开发工具后解析最低运行依赖 |
 | 2026-10-08 | 7d16a4c | 补齐外置 Demo/README、独立 CI 和 release dry-run；干净 wheel 导入、Demo 及测试通过 |
 | 2026-10-08 | 84fa007 | 统一绝对导入，将测试替身移至 tests/support，并禁止测试内容进入 wheel/sdist |

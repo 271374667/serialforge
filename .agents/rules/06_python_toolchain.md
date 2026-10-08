@@ -92,6 +92,11 @@ ty 严格规则可按所用版本验证后启用；不把未核实的规则名�
 - 打包或导入布局变更后，在干净环境安装 wheel，从源码根目录之外验证导入与入口；
   仅在项目根运行成功不能证明安装包正确。
 - 工具不可用、离线或检查失败时明确报告，不宣称验证通过。
+- serialforge 的 `uv run pytest` 默认使用开发专用 pytest-xdist，自动选择最多 4 个 worker，
+  采用 worksteal 调度；用 `-n 0` 串行调试，`-n 2` 减少 worker。如需更多 worker，同时提高
+  `--maxprocesses`。`-m hardware` 由 tests/conftest.py 在调度前强制串行，仍需明确启用变量和端口。
+- 测试进程各自持有 Qt 应用和假后端；文件资源使用 tmp_path，不共享真实端口或用户缓存。
+  wheel 冒烟的外置验收环境也安装 pytest-xdist；插件只在 dev group，不加入客户运行依赖。
 
 ## 5. Windows 10 x64
 

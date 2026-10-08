@@ -31,6 +31,7 @@ dev = [
     "pylint",
     "pytest",
     "pytest-qt",
+    "pytest-xdist>=3.8.0",
     "ruff",
     "twine",
     "ty",
@@ -47,7 +48,7 @@ exclude = ["**/__pycache__", "**/*.pyc", "src/serialforge/testing"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q --strict-markers"
+addopts = "-q --strict-markers -n auto --maxprocesses=4 --dist worksteal"
 markers = [
     "hardware: requires a real Windows serial device",
 ]
