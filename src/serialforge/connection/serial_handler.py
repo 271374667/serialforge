@@ -39,8 +39,10 @@ class SerialHandler(QObject):
 
     Create and retain the handler in the application's Qt thread. Use QObject
     slots in that thread for queued delivery; keep its event loop running.
-    ``send`` accepts calls from any thread. Connection methods belong to the
-    owner thread. Declarations and results retain the original spec identity.
+    ``send`` accepts calls from any thread. ``connect`` blocks its caller while
+    worker threads discover, open and initialize the device; applications may
+    call it in their own worker thread. Declarations and results retain the
+    original spec identity.
 
     Attributes:
         connection_state_changed: Emit the new ConnectionState.
@@ -52,9 +54,10 @@ class SerialHandler(QObject):
     Example:
         With a QCoreApplication and application-owned declarations already
         created, register before sending: ``handler.register(spec)``;
-        ``handler.connect()``; after CONNECTED, ``handler.send(spec)``.
+        ``handler.connect()``; then ``handler.send(spec)``.
         In the completion slot, check ``result.spec is spec`` and ``result.ok``.
-        See ``examples/demo.py`` for an executable no-hardware application.
+        See ``examples/quick_start.py`` for an executable no-hardware
+        application.
     """
 
     connection_state_changed = Signal(ConnectionState)
@@ -138,15 +141,22 @@ class SerialHandler(QObject):
     # ty: ignore[invalid-method-override, missing-override-decorator] --
     # QObject has an unrelated C++ signal-connect overload with the same name.
     def connect(self, target: str | DeviceInfo | None = None) -> None:
-        """Start discovery or a direct connection, returning immediately.
+        """Wait for discovery, opening and initialization to complete.
 
         Args:
-            target: None discovers matching VID/PID devices; a port name skips
-                VID/PID filtering but probes its baudrate. DeviceInfo with a
-                known baudrate opens directly. States and errors use signals.
+            target: None discovers devices, filtering only when the profile
+                supplies VID/PID; a port name bypasses that filter and probes
+                its baudrate. DeviceInfo with a known baudrate opens directly.
+                Work runs in background threads;
+                returning successfully means the connection is ready to send.
+
+        Note:
+            Waiting uses thread synchronization and needs no Qt event pumping.
+            Call from an application worker thread to keep a UI responsive.
 
         Raises:
-            SerialForgeError: A connection or earlier worker is still active.
+            SerialForgeError: A connection is active, opening fails, discovery
+                finds no device, or another thread cancels this attempt.
         """
         with self._state_lock:
             if self._state not in {
@@ -161,14 +171,15 @@ class SerialHandler(QObject):
                 raise SerialForgeError(
                     "previous connection worker is still running"
                 )
-            self._worker = ConnectionWorker(self, target)
-        self._transition(
-            ConnectionState.CONNECTING
-            if isinstance(target, DeviceInfo)
-            else ConnectionState.PROBING
-        )
-        assert self._worker is not None
-        self._worker.start()
+            worker = ConnectionWorker(self, target)
+            self._worker = worker
+            self._transition(
+                ConnectionState.CONNECTING
+                if isinstance(target, DeviceInfo)
+                else ConnectionState.PROBING
+            )
+            worker.start()
+        worker.wait_for_connection()
 
     # ty: ignore[invalid-method-override, missing-override-decorator] --
     # This public facade method intentionally shadows QObject.disconnect().

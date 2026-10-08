@@ -75,7 +75,6 @@
       "methods": {
         "__init__": "(self, profile: 'DeviceProfile') -> 'None'",
         "find": "(self, mode: 'ScanMode' = <ScanMode.ALL: 'all'>, *, port: 'str | None' = None) -> 'list[DeviceInfo]'",
-        "find_async": "(self, mode: 'ScanMode' = <ScanMode.ALL: 'all'>, *, port: 'str | None' = None) -> 'None'",
         "cancel": "(self) -> 'None'",
         "forget": "(self, device: 'DeviceInfo') -> 'None'",
         "run_find": "(self, mode: 'ScanMode', port: 'str | None') -> 'list[DeviceInfo]'"
@@ -89,14 +88,14 @@
     },
     "serialforge.DeviceProfile": {
       "methods": {
-        "__init__": "(self, vid_pid: 'Sequence[tuple[int, int]]', baudrates: 'Sequence[int]', probe: 'CommandSpec | object', name: 'str | None' = None, terminator: 'str' = '\\r\\n', encoding: 'str' = 'utf-8', echo: 'bool' = False, heartbeat_s: 'float | None' = None, serial: 'SerialConfig | None' = None, framing: 'FramingConfig | None' = None, runtime: 'RuntimeConfig | None' = None) -> None"
+        "__init__": "(self, vid_pid: 'Sequence[tuple[int, int]] | None' = None, baudrates: 'Sequence[int]' = (), probe: 'CommandSpec | object' = None, name: 'str | None' = None, terminator: 'str' = '\\r\\n', encoding: 'str' = 'utf-8', echo: 'bool' = False, heartbeat_s: 'float | None' = None, serial: 'SerialConfig | None' = None, framing: 'FramingConfig | None' = None, runtime: 'RuntimeConfig | None' = None) -> None"
       },
       "properties": {},
       "signals": {},
       "fields": [
         {
           "name": "vid_pid",
-          "type": "Sequence[tuple[int, int]]",
+          "type": "Sequence[tuple[int, int]] | None",
           "kw_only": false
         },
         {

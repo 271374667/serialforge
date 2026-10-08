@@ -32,6 +32,11 @@ def _normalise_text(value: str) -> str:
     return value.strip().rstrip("\r\n").strip()
 
 
+def _is_integer(value: object) -> bool:
+    """Validate runtime configuration values without accepting booleans."""
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
 def _compiled_pattern(value: str, field_name: str) -> re.Pattern[str]:
     """Compile a regular expression and reject unnamed capture groups."""
     try:
@@ -130,7 +135,8 @@ class CommandSpec:
 
     Note:
         Frozen with identity equality: register and reuse this exact object.
-        See examples/demo.py for an executable declaration and send workflow.
+        See examples/quick_start.py for an executable declaration and send
+        workflow.
 
     Raises:
         CommandError: If the declaration is inconsistent or invalid.
@@ -284,10 +290,12 @@ class DeviceProfile:
     """Describe how a device is identified, opened and framed.
 
     Args:
-        vid_pid: Non-empty USB identity pairs used for automatic discovery.
+        vid_pid: Optional USB identity whitelist; omitted, None or empty scans
+            all available ports and validates them with the required probe.
         baudrates: Non-empty, unique, positive candidate rates, in probe order.
         probe: SINGLE CommandSpec or advanced.ProbeSpec that cannot match echo.
-        name: Optional display name; defaults to the first USB identity.
+        name: Optional display name; defaults to the first USB identity or
+            "serial device" when no USB whitelist is supplied.
         terminator: Text suffix for transmitted requests; defaults to CRLF.
         encoding: Text encoding used at the bytes boundary; defaults to UTF-8.
         echo: Drop echoed requests before matching responses when True.
@@ -300,9 +308,11 @@ class DeviceProfile:
         ConfigError: An identity, rate, probe or timing setting is invalid.
     """
 
-    vid_pid: Sequence[tuple[int, int]]
-    baudrates: Sequence[int]
-    probe: CommandSpec | object
+    # Defaults preserve the existing (vid_pid, baudrates, probe) positional
+    # order. Baudrates and probe remain required through validation below.
+    vid_pid: Sequence[tuple[int, int]] | None = None
+    baudrates: Sequence[int] = ()
+    probe: CommandSpec | object = None
     name: str | None = None
     terminator: str = "\r\n"
     encoding: str = "utf-8"
@@ -315,12 +325,10 @@ class DeviceProfile:
     # pylint: disable=too-many-branches
     def __post_init__(self) -> None:
         """Validate device identity, probe and default transport settings."""
-        pairs = tuple(self.vid_pid)
-        if not pairs:
-            raise ConfigError("vid_pid must not be empty")
+        pairs = tuple(self.vid_pid or ())
         for pair in pairs:
             if len(pair) != 2 or any(
-                isinstance(value, bool) or not 0 <= value <= 0xFFFF
+                not _is_integer(value) or not 0 <= value <= 0xFFFF
                 for value in pair
             ):
                 raise ConfigError(
@@ -328,7 +336,7 @@ class DeviceProfile:
                 )
         rates = tuple(self.baudrates)
         if not rates or any(
-            isinstance(rate, bool) or rate <= 0 for rate in rates
+            not _is_integer(rate) or rate <= 0 for rate in rates
         ):
             raise ConfigError("baudrates must contain unique positive integers")
         if len(set(rates)) != len(rates):
@@ -364,8 +372,12 @@ class DeviceProfile:
         if self.runtime is None:
             object.__setattr__(self, "runtime", _default_runtime_config())
         if self.name is None:
-            first_vid, first_pid = pairs[0]
-            object.__setattr__(self, "name", f"{first_vid:04X}:{first_pid:04X}")
+            if pairs:
+                first_vid, first_pid = pairs[0]
+                default_name = f"{first_vid:04X}:{first_pid:04X}"
+            else:
+                default_name = "serial device"
+            object.__setattr__(self, "name", default_name)
         object.__setattr__(self, "vid_pid", pairs)
         object.__setattr__(self, "baudrates", rates)
 

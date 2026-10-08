@@ -92,16 +92,20 @@ with use_fake_backend(backend):
 `send_and_wait()` 只允许在没有运行 Qt 事件循环的脚本线程调用。退出前调用
 `disconnect()`，它会等待 I/O 线程停止，也挂接了 `aboutToQuit`。
 
-## 无硬件 Demo
+## 无硬件示例
 
-独立 Demo 在同一连接与发现路径上注入内存后端，并演示无结束符回复的静默定界：
+`examples/` 下的三个脚本用内存后端替换串口边界，不需要真实设备：
 
 ```powershell
-uv run python examples/demo.py
+uv run python examples/quick_start.py    # 五种取信息方式：单发单收/单发多收/流式/主动上报/无回复
+uv run python examples/auto_connect.py   # 参数 + 探测指令自动发现并连接设备
+uv run python examples/interactive.py    # while + input 实时交互
 ```
 
-输出包含版本结果和 `spec_is_VERSION=True`。README 代码和 Demo 都由
-`tests/test_demo.py` 实际运行；wheel 冒烟时在源码目录之外复制这两项验收输入。
+假后台与设备指令集只写一份，在 `examples/virtual_device.py`（模块顶部是完整指令集表），
+三个示例里因此只有 serialforge 的调用。三个示例都是面向对象的，模块顶层只有
+`if __name__ == "__main__":`。README 代码和示例都由 `tests/test_examples.py` 实际运行；
+wheel 冒烟时在源码目录之外复制这些验收输入。
 
 ## 添加命令
 

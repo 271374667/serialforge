@@ -59,6 +59,8 @@ class ConnectionWorker(QThread):
         self._reconnects: int = 0
         self._session_started: bool = False
         self._finder: DeviceFinder | None = None
+        self._connection_completed: threading.Event = threading.Event()
+        self._connection_error: SerialForgeError | None = None
 
     @property
     def port(self) -> str | None:
@@ -78,6 +80,54 @@ class ConnectionWorker(QThread):
         if transport is not None:
             transport.cancel_read()
             transport.cancel_write()
+
+    def wait_for_connection(self) -> None:
+        """Wait without Qt events until ready or startup cleanup finishes."""
+        self._connection_completed.wait()
+        if self._connection_error is not None:
+            self.wait()
+            raise self._connection_error
+
+    def finish_startup(self) -> None:
+        """Release the startup waiter once, carrying readiness or an error."""
+        if self._connection_completed.is_set():
+            return
+        if (
+            self._handler.state is not ConnectionState.CONNECTED
+            and self._connection_error is None
+        ):
+            self._connection_error = SerialForgeError(
+                "connection attempt was cancelled"
+                if self._stop.is_set()
+                else "connection attempt ended before ready"
+            )
+        self._connection_completed.set()
+
+    def report_failure(self, error: Exception) -> bool:
+        """Publish a worker error and identify whether startup failed."""
+        initial = not self._connection_completed.is_set()
+        payload = (
+            error
+            if isinstance(error, SerialForgeError)
+            else SerialForgeError(str(error))
+        )
+        if initial:
+            self._connection_error = payload
+        self._handler._report_error(payload)
+        self._handler._transition(
+            ConnectionState.FAILED if initial else ConnectionState.RECONNECTING
+        )
+        return initial
+
+    def finish_connection(self) -> None:
+        """Close the session and unblock startup even if cleanup fails."""
+        try:
+            self.close_transport()
+            self._handler._traffic.end_connection()
+            if self._stop.is_set():
+                self._handler._transition(ConnectionState.DISCONNECTED)
+        finally:
+            self.finish_startup()
 
     def write(self, data: bytes) -> int:
         """Write through the current transport and report a broken handle."""
@@ -122,13 +172,13 @@ class ConnectionWorker(QThread):
                     if self._stop.is_set():
                         break
                     self._handler._transition(ConnectionState.RECONNECTING)
-                except (OSError, RuntimeError, SerialForgeError) as exc:
+                # A worker failure must reach the blocked caller as an error,
+                # including exceptions raised by application probe predicates.
+                except Exception as exc:  # pylint: disable=broad-exception-caught
                     if not self._stop.is_set():
-                        self._handler._report_error(exc)
-                        if first:
-                            self._handler._transition(ConnectionState.FAILED)
+                        if self.report_failure(exc):
                             return
-                        self._handler._transition(ConnectionState.RECONNECTING)
+                        first = False
                 finally:
                     self.close_transport()
                 if self._stop.is_set():
@@ -146,10 +196,7 @@ class ConnectionWorker(QThread):
                 )
                 self._stop.wait(delay * random.uniform(0.9, 1.1))
         finally:
-            self.close_transport()
-            self._handler._traffic.end_connection()
-            if self._stop.is_set():
-                self._handler._transition(ConnectionState.DISCONNECTED)
+            self.finish_connection()
 
     def resolve_target(self, *, reconnect: bool) -> DeviceInfo:
         """Resolve an explicit target or ask discovery for a matching device."""
@@ -242,7 +289,13 @@ class ConnectionWorker(QThread):
                     SerialForgeError(f"initialization command failed: {item!r}")
                 )
             if self._stop.is_set() or self._reader_failed():
-                return
+                break
+        if self._stop.is_set():
+            return
+        if self._reader_failed():
+            raise SerialForgeError(
+                "serial connection was lost during initialization"
+            )
         port = self._port
         assert port is not None
         if not self._session_started:
@@ -254,6 +307,7 @@ class ConnectionWorker(QThread):
                 port, f"RECONNECTED attempt={self._reconnects}"
             )
         self._handler._transition(ConnectionState.CONNECTED)
+        self.finish_startup()
         last_heartbeat = time.monotonic()
         while not self._stop.is_set() and not self._reader_failed():
             self._handler._dispatcher.pump()

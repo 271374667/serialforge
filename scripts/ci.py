@@ -138,7 +138,16 @@ def smoke(wheel: Path, version: str) -> None:
             str(wheel.resolve()),
         ]
         run([*prefix, "python", "-c", IDENTITY_CHECK], cwd=directory, env=env)
-        run([*prefix, "python", "examples/demo.py"], cwd=directory, env=env)
+        run(
+            [*prefix, "python", "examples/quick_start.py"],
+            cwd=directory,
+            env=env,
+        )
+        run(
+            [*prefix, "python", "examples/auto_connect.py"],
+            cwd=directory,
+            env=env,
+        )
         run(
             [
                 *prefix,

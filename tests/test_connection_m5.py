@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import threading
 import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import QCoreApplication
+from PySide6.QtCore import QCoreApplication, Qt
 
 from serialforge import (
     CommandResult,
@@ -22,9 +24,10 @@ from serialforge import (
 )
 from serialforge.advanced import FramingConfig, RuntimeConfig, SerialConfig
 from serialforge.enums import FramingMode
-from serialforge.errors import SerialForgeError
+from serialforge.errors import PortNotFoundError, SerialForgeError
 from serialforge.transport import PortRegistry
 from tests.support import FakeBackend, SimulatedDevice, use_fake_backend
+from tests.support.recording_backend import RecordingBackend
 
 
 @dataclass(frozen=True)
@@ -97,7 +100,7 @@ def test_direct_connection_matches_unterminated_version(version: str) -> None:
         handler.connection_state_changed.connect(states.append)
         handler.connect(DeviceInfo(port="SIM1", baudrate=115200))
         try:
-            wait_until(lambda: handler.state is ConnectionState.CONNECTED)
+            assert handler.state is ConnectionState.CONNECTED
             ticket = handler.send(VERSION)
             wait_until(lambda: len(results) == 1)
             assert results[0].status is CommandStatus.OK
@@ -183,7 +186,7 @@ def test_unexpected_write_loss_reconnects_without_new_log_file(
         handler.command_finished.connect(results.append)
         handler.connect(DeviceInfo(port="SIM3", baudrate=115200))
         try:
-            wait_until(lambda: handler.state is ConnectionState.CONNECTED)
+            assert handler.state is ConnectionState.CONNECTED
             handler.send(VERSION)
             wait_until(lambda: len(results) == 1)
             handler.send(VERSION)
@@ -213,9 +216,11 @@ def test_initial_open_failure_does_not_auto_reconnect() -> None:
         handler = SerialHandler(profile())
         errors: list[SerialForgeError] = []
         handler.error_occurred.connect(errors.append)
-        handler.connect(DeviceInfo(port="MISSING", baudrate=115200))
         try:
-            wait_until(lambda: handler.state is ConnectionState.FAILED)
+            with pytest.raises(SerialForgeError, match="port not found"):
+                handler.connect(DeviceInfo(port="MISSING", baudrate=115200))
+            assert handler.state is ConnectionState.FAILED
+            app().processEvents()
             assert len(errors) == 1
             assert len(backend.transports) == 0
             assert not PortRegistry.is_owned("MISSING")
@@ -244,7 +249,7 @@ def test_heartbeat_timeout_reconnects_and_manual_disconnect_stops() -> None:
         handler.connection_state_changed.connect(states.append)
         handler.connect(DeviceInfo(port="SIM4", baudrate=115200))
         try:
-            wait_until(lambda: handler.state is ConnectionState.CONNECTED)
+            assert handler.state is ConnectionState.CONNECTED
             wait_until(lambda: ConnectionState.RECONNECTING in states)
         finally:
             handler.disconnect()
@@ -279,7 +284,8 @@ def test_discovery_connection_entry_points(target: str | None) -> None:
         handler.command_finished.connect(results.append)
         handler.connect(target)
         try:
-            wait_until(lambda: handler.state is ConnectionState.CONNECTED)
+            assert handler.state is ConnectionState.CONNECTED
+            app().processEvents()
             assert states[:3] == [
                 ConnectionState.PROBING,
                 ConnectionState.CONNECTING,
@@ -292,7 +298,188 @@ def test_discovery_connection_entry_points(target: str | None) -> None:
             assert results[0].data == VersionInfo("1.02")
         finally:
             handler.disconnect()
+
+
+def test_connect_waits_for_init_without_qt_events() -> None:
+    """Keep connect blocked in a caller thread until initialization finishes."""
+    app()
+    init_started = threading.Event()
+    allow_init = threading.Event()
+
+    def init_reply(_request: bytes) -> bytes:
+        init_started.set()
+        assert allow_init.wait(2)
+        return b"Software version 1.75"
+
+    backend = RecordingBackend(
+        [SimulatedDevice(0x067B, 0x23A3, port="INIT", script=init_reply)]
+    )
+    with use_fake_backend(backend):
+        handler = SerialHandler(profile())
+        handler.register(VERSION)
+        handler.set_init_sequence([VERSION])
+        results: list[CommandResult] = []
+        handler.command_finished.connect(
+            results.append, Qt.ConnectionType.DirectConnection
+        )
+        with ThreadPoolExecutor(max_workers=1) as caller:
+            future = caller.submit(
+                handler.connect, DeviceInfo(port="INIT", baudrate=115200)
+            )
+            try:
+                assert init_started.wait(2)
+                assert not future.done()
+                assert handler.state is ConnectionState.CONNECTING
+                with pytest.raises(SerialForgeError, match="cannot connect"):
+                    handler.connect()
+            finally:
+                allow_init.set()
+            try:
+                assert future.result(timeout=2) is None
+                assert handler.state is ConnectionState.CONNECTED
+                assert len(results) == 1
+                assert results[0].status is CommandStatus.OK
+                assert results[0].spec is VERSION
+                # Connection and this send need no processEvents or app.exec.
+                result = handler.send_and_wait(VERSION, timeout=2)
+                assert result.status is CommandStatus.OK
+                assert result.spec is VERSION
+            finally:
+                handler.disconnect()
         assert all(item.closed for item in backend.transports)
+
+
+def test_no_matching_device_raises_before_connect_returns() -> None:
+    """Report discovery failure synchronously and allow another attempt."""
+    app()
+    backend = FakeBackend()
+    with use_fake_backend(backend):
+        handler = SerialHandler(profile())
+        try:
+            for _ in range(2):
+                with pytest.raises(PortNotFoundError, match="no matching"):
+                    handler.connect()
+                assert handler.state is ConnectionState.FAILED
+                assert backend.transports == []
+        finally:
+            handler.disconnect()
+
+
+def test_blocking_connect_to_named_port_trusts_identity_and_is_ready() -> None:
+    """Trust the named port even if its USB identity is outside the profile."""
+    app()
+    backend = RecordingBackend(
+        [
+            SimulatedDevice(
+                0x1111,
+                0x2222,
+                port="NAMED",
+                baudrate=115200,
+                responses={b"Version\r\n": b"Software version 1.75"},
+            )
+        ]
+    )
+    with use_fake_backend(backend):
+        handler = SerialHandler(profile())
+        handler.register(VERSION)
+        handler.connect("NAMED")
+        try:
+            assert handler.state is ConnectionState.CONNECTED
+            assert handler.send_and_wait(VERSION, timeout=2).ok
+            assert len(backend.transports) == 2
+            assert backend.transports[0].closed
+            assert all(
+                tid != threading.get_ident() for _, _, tid in backend.attempts
+            )
+        finally:
+            handler.disconnect()
+
+
+def test_disconnect_cancels_a_callers_blocking_connection() -> None:
+    """Unblock a pending connect only after its probe handles are closed."""
+    app()
+    probing = threading.Event()
+
+    def silent_reply(_request: bytes) -> None:
+        probing.set()
+
+    backend = FakeBackend(
+        [SimulatedDevice(0x067B, 0x23A3, port="CANCEL", script=silent_reply)]
+    )
+    with use_fake_backend(backend):
+        handler = SerialHandler(profile())
+        with ThreadPoolExecutor(max_workers=1) as caller:
+            future = caller.submit(handler.connect)
+            try:
+                assert probing.wait(2)
+                assert not future.done()
+            finally:
+                handler.disconnect()
+            with pytest.raises(SerialForgeError, match="cancelled"):
+                future.result(timeout=2)
+        assert handler.state is ConnectionState.DISCONNECTED
+        assert all(item.closed for item in backend.transports)
+        assert not PortRegistry.is_owned("CANCEL")
+
+
+def test_no_usb_auto_connect_allows_immediate_send() -> None:
+    """Identify a non-USB device using only baudrates and the probe command."""
+    app()
+    backend = FakeBackend(
+        [
+            SimulatedDevice(
+                None,
+                None,
+                port="NO-USB",
+                baudrate=115200,
+                responses={b"Version\r\n": b"Software version 1.75"},
+            )
+        ]
+    )
+    no_usb_profile = DeviceProfile(baudrates=[115200], probe=VERSION)
+    with use_fake_backend(backend):
+        handler = SerialHandler(
+            replace(
+                no_usb_profile,
+                serial=profile().serial,
+                framing=profile().framing,
+            )
+        )
+        handler.register(VERSION)
+        handler.connect()
+        try:
+            assert handler.state is ConnectionState.CONNECTED
+            result = handler.send_and_wait(VERSION, timeout=2)
+            assert result.ok
+            assert result.data == VersionInfo("1.75")
+        finally:
+            handler.disconnect()
+        assert all(item.closed for item in backend.transports)
+
+
+def test_connection_lost_during_init_raises_after_startup_cleanup() -> None:
+    """Fail the initial attempt synchronously if initialization loses I/O."""
+    app()
+
+    def failed_init(_request: bytes) -> bytes:
+        raise OSError("initialization write failed")
+
+    backend = FakeBackend(
+        [SimulatedDevice(0x067B, 0x23A3, port="INIT-LOSS", script=failed_init)]
+    )
+    with use_fake_backend(backend):
+        handler = SerialHandler(profile())
+        handler.register(VERSION)
+        handler.set_init_sequence([VERSION])
+        try:
+            with pytest.raises(SerialForgeError, match="during initialization"):
+                handler.connect(DeviceInfo(port="INIT-LOSS", baudrate=115200))
+            assert handler.state is ConnectionState.FAILED
+            assert len(backend.transports) == 1
+            assert all(item.closed for item in backend.transports)
+            assert not PortRegistry.is_owned("INIT-LOSS")
+        finally:
+            handler.disconnect()
 
 
 def test_reconnect_queues_new_command_and_retries_idempotent_one() -> None:
@@ -331,7 +518,7 @@ def test_reconnect_queues_new_command_and_retries_idempotent_one() -> None:
         handler.command_finished.connect(results.append)
         handler.connect(DeviceInfo(port="SIM22", baudrate=115200))
         try:
-            wait_until(lambda: handler.state is ConnectionState.CONNECTED)
+            assert handler.state is ConnectionState.CONNECTED
             first = handler.send(safe_version)
             wait_until(lambda: handler.state is ConnectionState.RECONNECTING)
             queued = handler.send(safe_version)

@@ -1,7 +1,7 @@
 # serialforge · 架构总览
 
 > 类型: 活文档（原地更新，不编号、不归档）  |  最后更新: 2026-10-08
-> 基线 commit: 38d30d0（pytest-xdist 并行测试与完整发布前 CI 通过）  |  适用版本: 0.0.1
+> 基线 commit: 42b524d + 本次提交（阻塞连接/发现、可选 USB 身份，125 项软件测试通过）  |  适用版本: 0.0.1
 > 形态: 完整  |  维护: AI 更新（见 `.agents/rules/15_architecture_doc.md`）
 > 读法: 第 1、2、3、6 节为必读区（每次会话读，合计 ≤150 行）；其余按需读
 
@@ -29,7 +29,7 @@
 | `src/serialforge/advanced.py` | 进阶配置和统计再导出 | 再出口 | `advanced.__all__` | 定义层 | 使用方与实现层 |
 | `src/serialforge/transport/` | 字节流、定界、校验、延迟与端口后端 | `__init__.py`：M2 传输组件 | 内部模块 | L0 | discovery/connection |
 | `src/serialforge/connection/` | 命令注册、响应解析、调度与连接生命周期 | `command_registry.py:CommandRegistry`、`command_dispatcher.py:CommandDispatcher`、`serial_handler.py:SerialHandler`、`connection_worker.py:ConnectionWorker` | 顶层门面与内部调度组件 | L0-L2 | `__init__.py` |
-| `src/serialforge/discovery/` | 端口扫描、波特率探测、缓存与异步发现 | `device_finder.py:DeviceFinder`、`port_scanner.py:PortScanner`、`baud_prober.py:BaudProber` | `DeviceFinder` | L0-L1 | connection/顶层 |
+| `src/serialforge/discovery/` | 阻塞扫描、内部多线程波特率探测与缓存 | `device_finder.py:DeviceFinder`、`port_scanner.py:PortScanner`、`baud_prober.py:BaudProber` | `DeviceFinder` | L0-L1 | connection/顶层 |
 | `src/serialforge/diagnostics/` | 流量与文件日志 | `traffic_logger.py:TrafficLogger`、`log_file_manager.py:LogFileManager` | 内部诊断组件 | L0-L1 | connection |
 | `tests/support/` | 可脚本化假后端与模拟设备 | `__init__.py`：本地测试替身 | 测试内部导入 | L0-L1 | tests/、examples/ |
 | `tests/` | 契约、守卫、单元和 API 快照 | `test_*.py` | 本地验证 | src | CI |
@@ -38,7 +38,7 @@
 ## 4. 交互关系（按需）
 
 - 依赖单向：定义层 L0 → transport/diagnostics L1 → discovery L2 → connection L3 → 顶层再导出 L4；`tests/support/` 只作为测试注入边界，不是发布层。
-- 典型路径：`SerialHandler.connect()` 通过 discovery 获取端口，再由 transport 读写；命令经 registry/dispatcher 匹配并以 Qt 信号发送结果。
+- 典型路径：`SerialHandler.connect()` 阻塞等待工作线程完成发现、打开与初始化，成功返回即可发送；`DeviceFinder.find()` 在内部线程池扫描并等待所有探测句柄关闭后返回。应用需异步时自行开线程调用；命令经 registry/dispatcher 匹配并以 Qt 信号发送结果。
 - M1 建立定义层、命名空间与契约测试；M2 只实现可替换传输层、帧/校验/延迟基础设施和无硬件测试后端，不提前实现 connection/discovery 门面。
 
 ## 5. 状态与外部边界（按需）
@@ -50,6 +50,7 @@
 
 ## 6. 关键不变量（必读，最容易改错的地方）
 
+- 用户 2026-10-08 覆盖 v10 的异步入口与身份必填：connect/find 阻塞，不依赖 Qt 事件泵；VID/PID 可省略，提供时才过滤，指定端口绕过过滤；端口并行、同端口波特率串行，ALL 扫完全部，FIRST_MATCH 协作取消并回收探测句柄 —— **违反**：设备未就绪、资源泄漏或漏检目标 —— **生效范围**：models/connection/discovery/examples。
 - 顶层 `__all__` 恰为设计文档的 15 个名字 —— **违反**：破坏公共 API 预算和快照 —— **生效范围**：`src/serialforge/__init__.py`。
 - `CommandSpec` / `EventSpec` 是 `frozen=True, eq=False` 且全链路保留同一对象 —— **违反**：`result.spec is X` 失效 —— **生效范围**：models、registry、dispatcher、Qt 信号。
 - 发送终止符与接收定界相互独立；无结束符回复使用显式正数 `silence_gap_s` 的 `SILENCE_GAP`，接收循环须在无新字节时周期性 `flush()` —— **违反**：半包误判或命令永不完成 —— **生效范围**：advanced、transport、M5 connection、M6 discovery。
@@ -65,6 +66,7 @@
 | 想深入 | 读什么 |
 | --- | --- |
 | 设计契约 | `串口通讯模块_方案_v10定稿.md` |
+| 阻塞连接与可选身份的最新契约 | `.agents/docs/knowledge/software/0004_阻塞连接与可选USB身份契约.md` |
 | M1 进度 | `.agents/docs/checkpoint/_archive/0001_m1-foundation.md` |
 | M2 交接 | `.agents/docs/checkpoint/_archive/0002_m2-transport.md` |
 | 任务队列 | `.agents/docs/todo/README.md` |
@@ -74,6 +76,7 @@
 
 | 日期 | commit | 改了什么 |
 | --- | --- | --- |
+| 2026-10-08 | 本次提交 | 阻塞连接/发现、移除 find_async、VID/PID 可省略与缓存回退；探测并发/模式保持原设计，125 通过、1 硬件跳过 |
 | 2026-10-08 | 38d30d0 | pytest-xdist 仅作开发依赖；默认最多 4 个 worker、硬件选择强制串行；完整发布前 CI 各环境 100 通过、1 硬件跳过 |
 | 2026-10-08 | 559c714 | 完整发布前 CI 通过，Python 3.11–3.14、干净 wheel、最低组合均 99 项通过；真机矩阵仍待验收 |
 | 2026-10-08 | 112c954 | 最低组合 99 项通过；Qt 下限收紧至实测 6.11.2，临时副本固定开发工具后解析最低运行依赖 |

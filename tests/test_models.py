@@ -91,6 +91,33 @@ def test_profile_rejects_invalid_probe_and_identity_values() -> None:
         DeviceProfile([(1, 2)], [9600], CommandSpec("Probe", r"Probe"))
 
 
+def test_profile_can_omit_usb_identity_but_requires_rates_and_probe() -> None:
+    """Create a profile with only probing inputs and keep defaults usable."""
+    probe = CommandSpec("Version", r"Version: (?P<version>\S+)", VersionInfo)
+    profile = DeviceProfile(baudrates=[115200], probe=probe)
+    assert profile.vid_pid == ()
+    assert profile.baudrates == (115200,)
+    assert profile.probe is probe
+    assert profile.name == "serial device"
+    assert profile.serial == SerialConfig()
+    assert DeviceProfile([], [115200], probe).vid_pid == ()
+    assert DeviceProfile(None, [115200], probe).vid_pid == ()
+    with pytest.raises(ConfigError, match="baudrates"):
+        DeviceProfile(probe=probe)
+    with pytest.raises(ConfigError, match="probe"):
+        DeviceProfile(baudrates=[115200])
+
+
+@pytest.mark.parametrize("rate", [True, 115200.5, "115200"])
+def test_profile_rejects_non_integer_rates_without_usb_identity(
+    rate: object,
+) -> None:
+    """Keep required baudrate validation when the USB whitelist is omitted."""
+    with pytest.raises(ConfigError, match="baudrates"):
+        # ty: ignore[invalid-argument-type] -- Exercise invalid runtime inputs.
+        DeviceProfile(baudrates=[rate], probe=CommandSpec("Probe", "OK"))
+
+
 def test_command_result_ok_is_status_derived_and_data_is_frozen() -> None:
     result = CommandResult(
         status=CommandStatus.OK,

@@ -42,10 +42,12 @@ class BaudCache:
         """Prefer USB serial, then physical location, then the COM name."""
         if device.vid is not None and device.pid is not None:
             prefix = f"{device.vid:04X}:{device.pid:04X}"
-            if device.serial_number:
-                return f"{prefix}:serial:{device.serial_number}"
-            if device.location:
-                return f"{prefix}:location:{device.location}"
+        else:
+            prefix = "unknown"
+        if device.serial_number:
+            return f"{prefix}:serial:{device.serial_number}"
+        if device.location:
+            return f"{prefix}:location:{device.location}"
         return f"port:{device.port.upper()}"
 
     def get(self, device: DeviceInfo) -> int | None:

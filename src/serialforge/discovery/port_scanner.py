@@ -21,12 +21,14 @@ class PortScanner:
     def scan(self, port: str | None = None) -> list[DeviceInfo]:
         """Return matching descriptors without opening any serial port."""
         matches: list[DeviceInfo] = []
-        allowed = set(self._profile.vid_pid)
+        allowed = set(self._profile.vid_pid or ())
         for descriptor in self._backend.list_ports():
             name = getattr(descriptor, "device", None)
             vid = getattr(descriptor, "vid", None)
             pid = getattr(descriptor, "pid", None)
-            if not isinstance(name, str) or (vid, pid) not in allowed:
+            if not isinstance(name, str):
+                continue
+            if port is None and allowed and (vid, pid) not in allowed:
                 continue
             if port is not None and name.upper() != port.upper():
                 continue

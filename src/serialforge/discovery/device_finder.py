@@ -18,7 +18,6 @@ from loguru import logger
 from PySide6.QtCore import QCoreApplication, QObject, Signal
 
 from serialforge.advanced import RuntimeConfig
-from serialforge.discovery.async_scan_thread import AsyncScanThread
 from serialforge.discovery.baud_cache import BaudCache
 from serialforge.discovery.baud_prober import BaudProber
 from serialforge.discovery.port_scanner import PortScanner
@@ -36,16 +35,17 @@ from serialforge.transport import BackendSwitch, SerialTransport
 class DeviceFinder(QObject):
     """Find matching devices while remembering successful baudrates.
 
-    A QCoreApplication must exist before construction. Retain the finder until
-    async completion; connect QObject slots in the application thread.
+    A QCoreApplication must exist before construction. ``find`` blocks its
+    caller while enumeration and probing run in worker threads. Applications
+    can call it in their own worker thread for asynchronous behavior.
 
     Attributes:
         probe_progress: Emit (port, baudrate) for each probe attempt.
         probe_finished: Emit a list of DeviceInfo exactly once per scan.
 
     Example:
-        For a blocking script use ``DeviceFinder(profile).find()``. In a Qt
-        application connect probe_finished before ``finder.find_async()``.
+        Use ``DeviceFinder(profile).find()`` for all matching devices, or
+        ``find(ScanMode.FIRST_MATCH)`` to cancel other probes after a match.
     """
 
     probe_progress = Signal(str, int)
@@ -55,7 +55,7 @@ class DeviceFinder(QObject):
         """Create a finder without enumerating or opening any port.
 
         Args:
-            profile: VID/PID filters, candidate baudrates and required probe.
+            profile: Optional VID/PID filters, required baudrates and probe.
 
         Raises:
             SerialForgeError: No QCoreApplication exists.
@@ -74,13 +74,11 @@ class DeviceFinder(QObject):
         self._cancel: threading.Event = threading.Event()
         self._lock: threading.RLock = threading.RLock()
         self._active: bool = False
-        self._thread: AsyncScanThread | None = None
-        self._shutdown_hooked: bool = False
 
     def find(
         self, mode: ScanMode = ScanMode.ALL, *, port: str | None = None
     ) -> list[DeviceInfo]:
-        """Block until discovery completes, leaving enumeration to a worker.
+        """Wait for discovery and all probe handles to be closed.
 
         Args:
             mode: ALL returns every match; FIRST_MATCH stops other probes.
@@ -89,43 +87,25 @@ class DeviceFinder(QObject):
         Returns:
             Matching devices with successful baudrates and probe responses.
 
+        Note:
+            Different ports are probed concurrently; rates on one port are
+            tried serially. FIRST_MATCH cooperatively cancels other probes and
+            joins their workers before returning. No Qt event loop is needed
+            to obtain the return value.
+
         Raises:
             ProbeError: Another scan is already active on this finder.
         """
-        self._begin()
+        with self._lock:
+            if self._active:
+                raise ProbeError("a device scan is already active")
+            self._active = True
+            self._cancel.clear()
         return self.run_find(mode, port)
-
-    def find_async(
-        self, mode: ScanMode = ScanMode.ALL, *, port: str | None = None
-    ) -> None:
-        """Return immediately and publish results through probe_finished.
-
-        Args:
-            mode: ALL or FIRST_MATCH completion policy.
-            port: Optional trusted port, bypassing VID/PID filtering.
-
-        Raises:
-            ProbeError: Another scan is already active on this finder.
-        """
-        self._begin()
-        thread = AsyncScanThread(self, mode, port)
-        self._thread = thread
-        application = QCoreApplication.instance()
-        assert application is not None
-        application.aboutToQuit.connect(self._shutdown)
-        self._shutdown_hooked = True
-        thread.start()
 
     def cancel(self) -> None:
         """Request cooperative cancellation; completion still emits a list."""
         self._cancel.set()
-
-    def _shutdown(self) -> None:
-        """Join an asynchronous scan before Qt destroys its thread."""
-        self.cancel()
-        thread = self._thread
-        if thread is not None and thread.isRunning():
-            thread.wait(5000)
 
     def forget(self, device: DeviceInfo) -> None:
         """Discard one remembered baudrate hint.
@@ -135,23 +115,15 @@ class DeviceFinder(QObject):
         """
         self._cache.forget(device)
 
-    def _begin(self) -> None:
-        """Reject overlapping scans and reset cancellation state."""
-        with self._lock:
-            if self._active:
-                raise ProbeError("a device scan is already active")
-            self._active = True
-            self._cancel.clear()
-
     def run_find(self, mode: ScanMode, port: str | None) -> list[DeviceInfo]:
         """Run the coordinator after a scan has been started internally.
 
         Args:
-            mode: Completion policy passed by find or find_async.
+            mode: Completion policy passed by find.
             port: Optional port restriction passed by the public scan method.
 
         Returns:
-            Completed probe results; use find or find_async to start a scan.
+            Completed probe results; use find to start a scan.
         """
         result: list[DeviceInfo] = []
         try:
@@ -163,11 +135,6 @@ class DeviceFinder(QObject):
         finally:
             with self._lock:
                 self._active = False
-            if self._shutdown_hooked:
-                application = QCoreApplication.instance()
-                if application is not None:
-                    application.aboutToQuit.disconnect(self._shutdown)
-                self._shutdown_hooked = False
             self.probe_finished.emit(result)
         return result
 
@@ -204,9 +171,13 @@ class DeviceFinder(QObject):
                         results.append(device)
                         if mode is ScanMode.FIRST_MATCH:
                             self._cancel.set()
+                            for pending in futures:
+                                pending.cancel()
                             break
             except FutureTimeoutError:
                 self._cancel.set()
+                for pending in futures:
+                    pending.cancel()
         return results[:1] if mode is ScanMode.FIRST_MATCH else results
 
 

@@ -17,8 +17,8 @@ class SimulatedDevice:
     provide dynamic behavior and takes precedence.
     """
 
-    vid: int
-    pid: int
+    vid: int | None
+    pid: int | None
     port: str = "SIM1"
     serial_number: str | None = None
     location: str | None = None
