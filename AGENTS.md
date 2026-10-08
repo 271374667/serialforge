@@ -12,7 +12,7 @@
 | 入口 | `src/serialforge/__init__.py`；开发脚本在 `scripts/` |
 | 构建 | `uv build` |
 | 测试 | `uv run pytest`；阶段 CI 为 `uv run python scripts/ci.py` |
-| 当前阶段 | M6 实现与 COM11 真机扫描完成；等待确认进入 M7 |
+| 当前阶段 | M1→M6 阶段交付已完成；M7 已登记交接，开发留到新对话 |
 | 架构总览 | `.agents/ARCHITECTURE.md`（第 1、2、3、6 节为每次必读区，≤150 行） |
 
 目录重点：`src/serialforge/` 是源码，`tests/` 是测试，`examples/` 放使用方命令示例，`.agents/` 放项目规范与交接文档；本 skill 不复制进项目技能目录。
