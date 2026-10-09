@@ -1,7 +1,7 @@
 # serialforge · 架构总览
 
 > 类型: 活文档（原地更新，不编号、不归档）  |  最后更新: 2026-10-09
-> 基线 commit: 4b0bf41 + R2–R5 实现工作区（完整验收进行中）  |  适用版本: 0.0.1
+> 基线 commit: 89a28de（R1–R5 完整软件验收通过）  |  适用版本: 0.0.1
 > 形态: 完整  |  维护: AI 更新（见 `.agents/rules/15_architecture_doc.md`）
 > 读法: 第 1、2、3、6 节为必读区（每次会话读，合计 ≤150 行）；其余按需读
 
@@ -16,7 +16,7 @@
 - 交付物：可构建的 Python 库 `serialforge` 与本地 CI 脚本；无硬件 Demo 放在 `examples/`，测试替身放在 `tests/support/`，不进入发布 wheel。
 - 运行方式：使用方 `from serialforge import ...`；业务命令运行时声明并注册；Qt 应用提供 `QCoreApplication` 事件循环。
 - 关键依赖：Python >=3.11；`pyserial>=3.5`、`loguru>=0.7`；QtCore extras 选择 `PySide6-Essentials>=6.11.2` 或 `PyQt6>=6.11`；uv + hatchling 构建。Qt 下限取本次完整套件通过的保守值，旧版存在 connect 名称冲突。
-- 运行接口遵循知识索引 0005；统一 Spec/Message、主线程期限回调与 SerialForge 门面已接入。qt_core 只导入选定绑定的 QtCore；QtPy 因 QtGui 导入路径不采用，双绑定矩阵验收进行中。
+- 运行接口遵循知识索引 0005；统一 Spec/Message、主线程期限回调与 SerialForge 门面已接入。qt_core 只导入选定绑定的 QtCore；QtPy 因 QtGui 导入路径不采用，双绑定 Python 3.11–3.14 八个组合均已验收通过。
 
 ## 3. 模块地图（必读）
 
@@ -36,7 +36,7 @@
 | `tests/` | 契约、守卫、单元和 API 快照 | `test_*.py` | 本地验证 | src | CI |
 | `examples/`、`scripts/`、`docs/` | 外置 Demo、本地 CI 与发布/真机验收说明 | `demo.py`、`ci.py`、`release.py` | 开发与维护者工具，不发布测试替身 | 源码或安装的 wheel、tests/support | 使用方/本地验收 |
 
-当前实现：SerialForge 组合 HandlerCore；Spec/Message 为统一声明与消息，CommandCall 保存完成状态与期限，通过门面的 QtCore 排队桥接投递主线程闭包。所有源码 Qt 导入经 qt_core，PySide6/PyQt6 为安装 extras，R5 矩阵正在验收。
+当前实现：SerialForge 组合 HandlerCore；Spec/Message 为统一声明与消息，CommandCall 保存完成状态与期限，通过门面的 QtCore 排队桥接投递主线程闭包。所有源码 Qt 导入经 qt_core，PySide6/PyQt6 为安装 extras，R5 完整矩阵已通过。
 
 ## 4. 交互关系（按需）
 
@@ -81,6 +81,7 @@
 
 | 日期 | commit | 改了什么 |
 | --- | --- | --- |
+| 2026-10-09 | 89a28de | R1–R5 实现完成；八个 Python/Qt 组合各 169 通过、1 硬件跳过；干净双绑定 wheel、最低依赖、静态检查、构建与文档站点均通过；真机仍未验收 |
 | 2026-10-09 | R1 契约提交 | 固化 SerialForge/Spec/Message、主线程期限回调与收发观察目标；选窄 Qt6 层；源码/依赖不变，22 项基线通过 |
 | 2026-10-08 | 本次提交 | 阻塞连接/发现、移除 find_async、VID/PID 可省略与缓存回退；探测并发/模式保持原设计，125 通过、1 硬件跳过 |
 | 2026-10-08 | 38d30d0 | pytest-xdist 仅作开发依赖；默认最多 4 个 worker、硬件选择强制串行；完整发布前 CI 各环境 100 通过、1 硬件跳过 |

@@ -7,12 +7,12 @@
 | 项目 | 内容 |
 | --- | --- |
 | 名称 | serialforge |
-| 简介 | 面向 Windows 10/11 x64 的 PySide6 QtCore 串口通讯库 |
-| 技术栈 | Python 3.11+、uv、hatchling、PySide6-Essentials、pyserial、loguru |
+| 简介 | 面向 Windows 10/11 x64 的 PySide6/PyQt6 QtCore 串口通讯库 |
+| 技术栈 | Python 3.11+、uv、hatchling、PySide6-Essentials/PyQt6 可选绑定、pyserial、loguru |
 | 入口 | `src/serialforge/__init__.py`；开发脚本在 `scripts/` |
 | 构建 | `uv build` |
 | 测试 | `uv run pytest`；阶段 CI 为 `uv run python scripts/ci.py` |
-| 当前阶段 | M7 软件验收通过、真机矩阵排队；公共 API 改造 R1 契约就绪，R2 待阶段确认 |
+| 当前阶段 | 公共 API 改造 R1–R5 软件验收通过；M7 真机矩阵仍排队 |
 | 架构总览 | `.agents/ARCHITECTURE.md`（第 1、2、3、6 节为每次必读区，≤150 行） |
 
 目录重点：`src/serialforge/` 是源码，`tests/` 是测试，`examples/` 放使用方命令示例，`.agents/` 放项目规范与交接文档；本 skill 不复制进项目技能目录。
@@ -39,7 +39,7 @@
 1. 既有 M1→M7 仍按 v10 交付，M7 未完成真机项不得提前归档；公共 API 改造按 R1→R5 进行，目标契约见知识索引 0005。用户 2026-10-09 明确授权本次 R2–R5 连续实施至完成，不再逐阶段等待确认；其他任务仍遵守原确认规则。
 2. 所有依赖与命令经 `uv` 管理；使用 `src` 布局与 hatchling；不使用 pip。
 3. 仅使用 QtCore；禁止 `QtWidgets`、`QtGui`、`asyncio`、`multiprocessing`；导入 `serialforge` 不得产生副作用。
-4. 顶层导出按公共 API 契约索引 0005：当前运行代码仍为旧 15 名字，过渡期 19、最终 11；各阶段实现与快照同步，不提前改快照伪装交付。进阶 API 在 `advanced`，异常子类在 `errors`。
+4. 顶层导出按公共 API 契约索引 0005：当前运行代码为过渡期 19 名字；下一次明确移除兼容入口后收敛为 11；各阶段实现与快照同步，不提前改快照伪装交付。进阶 API 在 `advanced`，异常子类在 `errors`。
 5. 新 `Spec` 与兼容 `CommandSpec` / `EventSpec` 必须 `frozen=True, eq=False`，全链路保留身份，库内不得复制或重建；字段构造形式只创建一次。业务判断仍使用原声明对象。
 6. serialforge 源码不包含具体业务命令；业务命令只能在 `examples/` 与 `tests/` 声明。
 7. 库内日志只用 loguru DEBUG，默认静默；不得执行 PyPI 上传，不生成云端 CI。
@@ -51,5 +51,5 @@
 - 发现文档与代码不符时立即更新 `.agents/ARCHITECTURE.md`。
 - 长任务使用 `.agents/docs/todo/README.md` 唯一调度索引；同一时间最多一个激活任务。
 - 本次公共 API 改造连续实施至 R5 完成；收尾只对本次修改文件运行格式化与类型检查，并如实记录 ty、Windows 真机和硬件未验证项。
-- 公共 API 目标：`SerialForge`、`Spec`、`Message`；主线程 `add_done_callback`，异步默认 3 秒且超时不回调；`received`/`raw_sent`，公开移除 `traffic_logged`；窄 Qt6 适配不引入 QtPy。实际交付状态以 checkpoint 为准。
+- 公共 API 目标：`SerialForge`、`Spec`、`Message`；主线程 `add_done_callback`，异步默认 3 秒且超时不回调；`received`/`raw_sent`，公开移除 `traffic_logged`；窄 Qt6 适配不引入 QtPy。实际交付契约与验收记录见知识索引 0005。
 - `project-ai-normalize` 脚手架当前含冲突标记，不能执行；本次规范目录按其模板手动生成，工具修复留作项目外问题。

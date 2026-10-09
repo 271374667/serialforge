@@ -1,11 +1,11 @@
 # 0010_QtCore双绑定适配决策
 
 > 分类: knowledge/software | 创建: 2026-10-09 | 适用范围: R5 Qt6 适配与打包
-> 状态: R2–R4 已接入源码；R5 双绑定与完整矩阵验收进行中
+> 状态: R1–R5 已实现并通过软件验收；真机矩阵未完成
 
 ## 决定
 
-采用内部窄 Qt6 适配模块 `serialforge.qt_core`，只直接导入 PySide6.QtCore 或 PyQt6.QtCore，不引入 QtPy。首期支持目标为 PySide6/PyQt6；Qt5、无 Qt 后端和低于 Python 3.11 不在本轮范围。适配层和安装 extras 已实现，正在执行完整双绑定矩阵。
+采用内部窄 Qt6 适配模块 `serialforge.qt_core`，只直接导入 PySide6.QtCore 或 PyQt6.QtCore，不引入 QtPy。首期支持目标为 PySide6/PyQt6；Qt5、无 Qt 后端和低于 Python 3.11 不在本轮范围。适配层和安装 extras 已实现，完整双绑定矩阵已通过。
 
 ## 核实依据
 
@@ -34,7 +34,7 @@
 
 R1 未修改 pyproject.toml/uv.lock；R5 已将 Qt 绑定移动到可选 extras：pyside6→PySide6-Essentials，pyqt6→PyQt6；核心仍为 pyserial/loguru。开发默认选择 pyside6。
 
-当前 PySide6 下限仍为已验证的 >=6.11.2。PyQt6 下限为 >=6.11，已实测 Windows x64 wheel 6.11.0（Qt 6.11.2）；Python 3.11–3.14 矩阵执行中；不得引入 QtPy。
+当前 PySide6 下限仍为已验证的 >=6.11.2。PyQt6 下限为 >=6.11，已实测 Windows x64 wheel 6.11.0（Qt 6.11.2）；Python 3.11–3.14 × 两种绑定共八个组合全部通过（每组 169 passed、1 hardware skipped）；不得引入 QtPy。
 
 每种绑定在独立进程/环境运行有效 Python 3.11–3.14 组合并构建干净 wheel。仅导入 QtCore，不承诺 Qt DLL 的内部本机依赖也完全没有其他库；禁止边界指 Python QtGui/QtWidgets 模块导入。
 
