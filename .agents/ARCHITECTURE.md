@@ -1,7 +1,7 @@
 # serialforge · 架构总览
 
-> 类型: 活文档（原地更新，不编号、不归档）  |  最后更新: 2026-10-08
-> 基线 commit: 42b524d + 本次提交（阻塞连接/发现、可选 USB 身份，125 项软件测试通过）  |  适用版本: 0.0.1
+> 类型: 活文档（原地更新，不编号、不归档）  |  最后更新: 2026-10-09
+> 基线 commit: f115fde + R1 契约提交（仅文档；当前运行 API 未变，22 项定向基线通过）  |  适用版本: 0.0.1
 > 形态: 完整  |  维护: AI 更新（见 `.agents/rules/15_architecture_doc.md`）
 > 读法: 第 1、2、3、6 节为必读区（每次会话读，合计 ≤150 行）；其余按需读
 
@@ -16,6 +16,7 @@
 - 交付物：可构建的 Python 库 `serialforge` 与本地 CI 脚本；无硬件 Demo 放在 `examples/`，测试替身放在 `tests/support/`，不进入发布 wheel。
 - 运行方式：使用方 `from serialforge import ...`；业务命令运行时声明并注册；Qt 应用提供 `QCoreApplication` 事件循环。
 - 关键依赖：Python >=3.11；`PySide6-Essentials>=6.11.2`（只用 QtCore）、`pyserial>=3.5`、`loguru>=0.7`；uv + hatchling 构建。Qt 下限取本次完整套件通过的保守值，旧版存在 connect 名称冲突。
+- 用户已批准的目标接口在知识索引 0005；当前代码仍为旧 API。Qt6 双绑定将使用窄内部 QtCore 适配层，QtPy 因 QtGui 导入路径不采用；适配/extras 均尚未实现，不宣称 PyQt6 已兼容。
 
 ## 3. 模块地图（必读）
 
@@ -51,8 +52,9 @@
 ## 6. 关键不变量（必读，最容易改错的地方）
 
 - 用户 2026-10-08 覆盖 v10 的异步入口与身份必填：connect/find 阻塞，不依赖 Qt 事件泵；VID/PID 可省略，提供时才过滤，指定端口绕过过滤；端口并行、同端口波特率串行，ALL 扫完全部，FIRST_MATCH 协作取消并回收探测句柄 —— **违反**：设备未就绪、资源泄漏或漏检目标 —— **生效范围**：models/connection/discovery/examples。
-- 顶层 `__all__` 恰为设计文档的 15 个名字 —— **违反**：破坏公共 API 预算和快照 —— **生效范围**：`src/serialforge/__init__.py`。
-- `CommandSpec` / `EventSpec` 是 `frozen=True, eq=False` 且全链路保留同一对象 —— **违反**：`result.spec is X` 失效 —— **生效范围**：models、registry、dispatcher、Qt 信号。
+- 顶层导出按知识索引 0005：当前旧 15 名字、目标过渡 19/最终 11；源码与快照随阶段同步 —— **违反**：接口与验收不同步 —— **生效范围**：顶层导出与 API 测试。
+- 新 Spec 与兼容 CommandSpec/EventSpec 均 frozen=True/eq=False，全链路保留对象身份 —— **违反**：result.spec is X 失效 —— **生效范围**：models、registry、dispatcher、回调/信号。
+- 新门面目标仅 received/raw_sent/connection_state_changed，不公开 traffic_logged；主线程成功且期限内 add_done_callback，默认发送总期限 3 秒，错误从同步/调用对象读取 —— **违反**：UI 跨线程或接口误导 —— **生效范围**：待实施的 R2–R5，具体见知识索引 0005；当前旧信号尚未迁移。
 - 发送终止符与接收定界相互独立；无结束符回复使用显式正数 `silence_gap_s` 的 `SILENCE_GAP`，接收循环须在无新字节时周期性 `flush()` —— **违反**：半包误判或命令永不完成 —— **生效范围**：advanced、transport、M5 connection、M6 discovery。
 - 定义层不导入实现子包，跨子包优先经 `__init__.py`；既有 connection_worker 重连身份解析直接使用 discovery.port_scanner 是当前例外 —— **违反**：循环依赖和架构守卫失败 —— **生效范围**：`src/serialforge/`。
 - 库内只使用 loguru DEBUG 且默认静默 —— **违反**：宿主应用收到意外输出或等级 —— **生效范围**：diagnostics 与 connection。
@@ -66,6 +68,7 @@
 | 想深入 | 读什么 |
 | --- | --- |
 | 设计契约 | `串口通讯模块_方案_v10定稿.md` |
+| 用户批准的公共 API 改造覆盖契约 | `.agents/docs/knowledge/software/0005_公共API改造_契约索引与迁移.md` |
 | 阻塞连接与可选身份的最新契约 | `.agents/docs/knowledge/software/0004_阻塞连接与可选USB身份契约.md` |
 | M1 进度 | `.agents/docs/checkpoint/_archive/0001_m1-foundation.md` |
 | M2 交接 | `.agents/docs/checkpoint/_archive/0002_m2-transport.md` |
@@ -76,6 +79,7 @@
 
 | 日期 | commit | 改了什么 |
 | --- | --- | --- |
+| 2026-10-09 | R1 契约提交 | 固化 SerialForge/Spec/Message、主线程期限回调与收发观察目标；选窄 Qt6 层；源码/依赖不变，22 项基线通过 |
 | 2026-10-08 | 本次提交 | 阻塞连接/发现、移除 find_async、VID/PID 可省略与缓存回退；探测并发/模式保持原设计，125 通过、1 硬件跳过 |
 | 2026-10-08 | 38d30d0 | pytest-xdist 仅作开发依赖；默认最多 4 个 worker、硬件选择强制串行；完整发布前 CI 各环境 100 通过、1 硬件跳过 |
 | 2026-10-08 | 559c714 | 完整发布前 CI 通过，Python 3.11–3.14、干净 wheel、最低组合均 99 项通过；真机矩阵仍待验收 |
