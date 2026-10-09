@@ -1,22 +1,22 @@
 # serialforge · 架构总览
 
 > 类型: 活文档（原地更新，不编号、不归档）  |  最后更新: 2026-10-09
-> 基线 commit: f115fde + R1 契约提交（仅文档；当前运行 API 未变，22 项定向基线通过）  |  适用版本: 0.0.1
+> 基线 commit: 4b0bf41 + R2–R5 实现工作区（完整验收进行中）  |  适用版本: 0.0.1
 > 形态: 完整  |  维护: AI 更新（见 `.agents/rules/15_architecture_doc.md`）
 > 读法: 第 1、2、3、6 节为必读区（每次会话读，合计 ≤150 行）；其余按需读
 
 ## 1. 这个项目是干什么的（必读）
 
 - **一句话**：serialforge 为 Windows x64 应用提供基于 QtCore 信号槽和线程的串口通讯、设备发现与命令调度能力。
-- **背景与动因**：把串口字节流、帧定界、设备探测、命令响应和日志封装为可发布到 PyPI 的库，让 PySide6 应用只接触稳定的门面 API。
+- **背景与动因**：把串口字节流、帧定界、设备探测、命令响应和日志封装为可发布到 PyPI 的库，让 Qt6 应用只接触稳定的门面 API。
 - **明确不做**：不包含任何具体设备业务命令；不使用 asyncio 或多进程；不导入 QtWidgets/QtGui；不承诺 Linux、32 位 Windows 或硬件无关的真机行为。
 
 ## 2. 外部形态（必读）
 
 - 交付物：可构建的 Python 库 `serialforge` 与本地 CI 脚本；无硬件 Demo 放在 `examples/`，测试替身放在 `tests/support/`，不进入发布 wheel。
 - 运行方式：使用方 `from serialforge import ...`；业务命令运行时声明并注册；Qt 应用提供 `QCoreApplication` 事件循环。
-- 关键依赖：Python >=3.11；`PySide6-Essentials>=6.11.2`（只用 QtCore）、`pyserial>=3.5`、`loguru>=0.7`；uv + hatchling 构建。Qt 下限取本次完整套件通过的保守值，旧版存在 connect 名称冲突。
-- 用户已批准的目标接口在知识索引 0005；当前代码仍为旧 API。Qt6 双绑定将使用窄内部 QtCore 适配层，QtPy 因 QtGui 导入路径不采用；适配/extras 均尚未实现，不宣称 PyQt6 已兼容。
+- 关键依赖：Python >=3.11；`pyserial>=3.5`、`loguru>=0.7`；QtCore extras 选择 `PySide6-Essentials>=6.11.2` 或 `PyQt6>=6.11`；uv + hatchling 构建。Qt 下限取本次完整套件通过的保守值，旧版存在 connect 名称冲突。
+- 运行接口遵循知识索引 0005；统一 Spec/Message、主线程期限回调与 SerialForge 门面已接入。qt_core 只导入选定绑定的 QtCore；QtPy 因 QtGui 导入路径不采用，双绑定矩阵验收进行中。
 
 ## 3. 模块地图（必读）
 
@@ -29,17 +29,19 @@
 | `src/serialforge/protocols.py` | 后端与传输协议 | 定义层 | 内部协议 | models | transport/discovery/connection |
 | `src/serialforge/advanced.py` | 进阶配置和统计再导出 | 再出口 | `advanced.__all__` | 定义层 | 使用方与实现层 |
 | `src/serialforge/transport/` | 字节流、定界、校验、延迟与端口后端 | `__init__.py`：M2 传输组件 | 内部模块 | L0 | discovery/connection |
-| `src/serialforge/connection/` | 命令注册、响应解析、调度与连接生命周期 | `command_registry.py:CommandRegistry`、`command_dispatcher.py:CommandDispatcher`、`serial_handler.py:SerialHandler`、`connection_worker.py:ConnectionWorker` | 顶层门面与内部调度组件 | L0-L2 | `__init__.py` |
+| `src/serialforge/connection/` | 命令注册、响应解析、调度与连接生命周期 | `command_registry.py:CommandRegistry`、`command_dispatcher.py:CommandDispatcher`、`serial_forge.py:SerialForge`、`handler_core.py:HandlerCore`、`command_call.py:CommandCall`、`connection_worker.py:ConnectionWorker` | 顶层门面与内部调度组件 | L0-L2 | `__init__.py` |
 | `src/serialforge/discovery/` | 阻塞扫描、内部多线程波特率探测与缓存 | `device_finder.py:DeviceFinder`、`port_scanner.py:PortScanner`、`baud_prober.py:BaudProber` | `DeviceFinder` | L0-L1 | connection/顶层 |
 | `src/serialforge/diagnostics/` | 流量与文件日志 | `traffic_logger.py:TrafficLogger`、`log_file_manager.py:LogFileManager` | 内部诊断组件 | L0-L1 | connection |
 | `tests/support/` | 可脚本化假后端与模拟设备 | `__init__.py`：本地测试替身 | 测试内部导入 | L0-L1 | tests/、examples/ |
 | `tests/` | 契约、守卫、单元和 API 快照 | `test_*.py` | 本地验证 | src | CI |
 | `examples/`、`scripts/`、`docs/` | 外置 Demo、本地 CI 与发布/真机验收说明 | `demo.py`、`ci.py`、`release.py` | 开发与维护者工具，不发布测试替身 | 源码或安装的 wheel、tests/support | 使用方/本地验收 |
 
+当前实现：SerialForge 组合 HandlerCore；Spec/Message 为统一声明与消息，CommandCall 保存完成状态与期限，通过门面的 QtCore 排队桥接投递主线程闭包。所有源码 Qt 导入经 qt_core，PySide6/PyQt6 为安装 extras，R5 矩阵正在验收。
+
 ## 4. 交互关系（按需）
 
 - 依赖单向：定义层 L0 → transport/diagnostics L1 → discovery L2 → connection L3 → 顶层再导出 L4；`tests/support/` 只作为测试注入边界，不是发布层。
-- 典型路径：`SerialHandler.connect()` 阻塞等待工作线程完成发现、打开与初始化，成功返回即可发送；`DeviceFinder.find()` 在内部线程池扫描并等待所有探测句柄关闭后返回。应用需异步时自行开线程调用；命令经 registry/dispatcher 匹配并以 Qt 信号发送结果。
+- 典型路径：`SerialForge.connect()` 阻塞等待工作线程完成发现、打开与初始化，成功返回即可发送；`DeviceFinder.find()` 在内部线程池扫描并等待所有探测句柄关闭后返回。应用需异步时自行开线程调用；命令经 registry/dispatcher 匹配并以 Qt 信号发送结果。
 - M1 建立定义层、命名空间与契约测试；M2 只实现可替换传输层、帧/校验/延迟基础设施和无硬件测试后端，不提前实现 connection/discovery 门面。
 
 ## 5. 状态与外部边界（按需）
@@ -52,9 +54,9 @@
 ## 6. 关键不变量（必读，最容易改错的地方）
 
 - 用户 2026-10-08 覆盖 v10 的异步入口与身份必填：connect/find 阻塞，不依赖 Qt 事件泵；VID/PID 可省略，提供时才过滤，指定端口绕过过滤；端口并行、同端口波特率串行，ALL 扫完全部，FIRST_MATCH 协作取消并回收探测句柄 —— **违反**：设备未就绪、资源泄漏或漏检目标 —— **生效范围**：models/connection/discovery/examples。
-- 顶层导出按知识索引 0005：当前旧 15 名字、目标过渡 19/最终 11；源码与快照随阶段同步 —— **违反**：接口与验收不同步 —— **生效范围**：顶层导出与 API 测试。
+- 顶层导出按知识索引 0005：当前过渡 19 名字、下一轮收敛最终 11；源码与快照随阶段同步 —— **违反**：接口与验收不同步 —— **生效范围**：顶层导出与 API 测试。
 - 新 Spec 与兼容 CommandSpec/EventSpec 均 frozen=True/eq=False，全链路保留对象身份 —— **违反**：result.spec is X 失效 —— **生效范围**：models、registry、dispatcher、回调/信号。
-- 新门面目标仅 received/raw_sent/connection_state_changed，不公开 traffic_logged；主线程成功且期限内 add_done_callback，默认发送总期限 3 秒，错误从同步/调用对象读取 —— **违反**：UI 跨线程或接口误导 —— **生效范围**：待实施的 R2–R5，具体见知识索引 0005；当前旧信号尚未迁移。
+- 新门面仅 received/raw_sent/connection_state_changed，不公开 traffic_logged；主线程成功且期限内 add_done_callback，默认发送总期限 3 秒，错误从同步/调用对象读取 —— **违反**：UI 跨线程或接口误导 —— **生效范围**：R2–R5，具体见知识索引 0005；兼容 SerialHandler 也不暴露旧信号。
 - 发送终止符与接收定界相互独立；无结束符回复使用显式正数 `silence_gap_s` 的 `SILENCE_GAP`，接收循环须在无新字节时周期性 `flush()` —— **违反**：半包误判或命令永不完成 —— **生效范围**：advanced、transport、M5 connection、M6 discovery。
 - 定义层不导入实现子包，跨子包优先经 `__init__.py`；既有 connection_worker 重连身份解析直接使用 discovery.port_scanner 是当前例外 —— **违反**：循环依赖和架构守卫失败 —— **生效范围**：`src/serialforge/`。
 - 库内只使用 loguru DEBUG 且默认静默 —— **违反**：宿主应用收到意外输出或等级 —— **生效范围**：diagnostics 与 connection。

@@ -8,7 +8,7 @@ from __future__ import annotations
 import codecs
 import re
 import string
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 from types import MappingProxyType
@@ -25,6 +25,39 @@ from serialforge.errors import CommandError, ConfigError
 
 if TYPE_CHECKING:
     from serialforge.advanced import FramingConfig, RuntimeConfig, SerialConfig
+
+
+@dataclass(frozen=True, eq=False)
+class _ContextSnapshot(Mapping[str, object]):
+    """Own an immutable shallow mapping safely reusable within an invocation."""
+
+    _values: Mapping[str, object]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "_values", MappingProxyType(dict(self._values))
+        )
+
+    # ty: ignore[missing-override-decorator] -- Python 3.11 runtime support.
+    def __getitem__(self, key: str) -> object:
+        return self._values[key]
+
+    # ty: ignore[missing-override-decorator] -- Python 3.11 runtime support.
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._values)
+
+    # ty: ignore[missing-override-decorator] -- Python 3.11 runtime support.
+    def __len__(self) -> int:
+        return len(self._values)
+
+
+def _freeze_context(value: Mapping[str, object]) -> Mapping[str, object]:
+    """Copy application mappings once, reusing only library-owned snapshots."""
+    return (
+        value
+        if isinstance(value, _ContextSnapshot)
+        else _ContextSnapshot(value)
+    )
 
 
 def _normalise_text(value: str) -> str:
@@ -51,7 +84,9 @@ def _compiled_pattern(value: str, field_name: str) -> re.Pattern[str]:
     return compiled
 
 
-def _template_fields(value: str) -> tuple[str, ...]:
+def _template_fields(
+    value: str, *, allow_priority: bool = False
+) -> tuple[str, ...]:
     """Return and validate named placeholders in a command template."""
     result: list[str] = []
     formatter = string.Formatter()
@@ -69,7 +104,7 @@ def _template_fields(value: str) -> tuple[str, ...]:
                 raise CommandError(
                     f"invalid command placeholder: {field_name!r}"
                 )
-            if field_name == "priority":
+            if field_name == "priority" and not allow_priority:
                 raise CommandError(
                     "command placeholder name 'priority' is reserved"
                 )
@@ -83,7 +118,7 @@ def _validate_result_type(
     pattern: re.Pattern[str], result_type: type[Any] | None, field_name: str
 ) -> None:
     """Check the basic one-to-one relation between groups and result types."""
-    if result_type is None:
+    if result_type is None or result_type is dict:
         return
     if not isinstance(result_type, type):
         raise CommandError(f"{field_name} must be a type")
@@ -463,6 +498,7 @@ class DeviceEvent:
     data: Any = None
     raw_frame: bytes | str = b""
     timestamp: float = 0.0
+    context: Mapping[str, object] = field(default_factory=dict)
 
 
 # Results carry every value needed by a signal consumer without mutable state.
@@ -486,6 +522,7 @@ class CommandResult:
 
     spec: CommandSpec | None = None
     route: SendRoute = SendRoute.SPEC
+    context: Mapping[str, object] = field(default_factory=dict, kw_only=True)
     params: Mapping[str, object] = field(default_factory=dict)
     sent: bytes = b""
     status: CommandStatus = CommandStatus.OK
@@ -494,9 +531,11 @@ class CommandResult:
     elapsed_s: float = 0.0
     request_id: str | None = None
     error_message: str | None = None
+    cause: Exception | None = field(default=None, kw_only=True)
 
     def __post_init__(self) -> None:
         """Freeze mapping and frame containers at the public boundary."""
+        object.__setattr__(self, "context", _freeze_context(self.context))
         object.__setattr__(self, "params", MappingProxyType(dict(self.params)))
         object.__setattr__(self, "raw_frames", tuple(self.raw_frames))
 

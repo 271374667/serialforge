@@ -4,12 +4,12 @@ import threading
 import time
 
 import pytest
-from PySide6.QtCore import QCoreApplication, QTimer
 
 from serialforge import CommandResult, CommandSpec, CommandStatus, DeviceProfile
 from serialforge.advanced import CommandTicket
-from serialforge.connection import SerialHandler
+from serialforge.connection.handler_core import HandlerCore as SerialHandler
 from serialforge.errors import CommandError
+from serialforge.qt_core import QCoreApplication, QTimer
 
 VERSION = CommandSpec("Version", r"Software version (?P<version>\S+)")
 _APP: QCoreApplication | None = None

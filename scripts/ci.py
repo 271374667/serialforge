@@ -116,7 +116,7 @@ def copy_validation_inputs(destination: Path) -> None:
         shutil.copy2(ROOT / name, destination / name)
 
 
-def smoke(wheel: Path, version: str) -> None:
+def smoke(wheel: Path, version: str, binding: str = "pyside6") -> None:
     """Install only the wheel and run external no-hardware acceptance inputs."""
     if not wheel.is_file():
         raise ValueError(f"wheel not found: {wheel}")
@@ -126,6 +126,8 @@ def smoke(wheel: Path, version: str) -> None:
         directory = Path(raw)
         copy_validation_inputs(directory)
         env = environment()
+        env["QT_API"] = binding
+        env["PYTEST_QT_API"] = binding
         env.pop("UV_PROJECT_ENVIRONMENT", None)
         prefix = [
             "uv",
@@ -136,6 +138,12 @@ def smoke(wheel: Path, version: str) -> None:
             version,
             "--with",
             str(wheel.resolve()),
+            "--with",
+            (
+                "PySide6-Essentials>=6.11.2"
+                if binding == "pyside6"
+                else "PyQt6>=6.11"
+            ),
         ]
         run([*prefix, "python", "-c", IDENTITY_CHECK], cwd=directory, env=env)
         run(
@@ -170,14 +178,31 @@ def smoke(wheel: Path, version: str) -> None:
 
 
 def matrix() -> None:
-    """Run the suite with an independent environment for each Python version."""
+    """Run each Python version with both bindings in separate environments."""
     for version in PYTHON_MATRIX:
-        env = environment()
-        env["UV_PROJECT_ENVIRONMENT"] = str(
-            ROOT / f".venv-py{version.replace('.', '')}"
-        )
-        run(["uv", "sync", "--locked", "--python", version], env=env)
-        run(["uv", "run", "--python", version, "--no-sync", "pytest"], env=env)
+        for binding in ("pyside6", "pyqt6"):
+            env = environment()
+            env["QT_API"] = binding
+            env["PYTEST_QT_API"] = binding
+            env["UV_PROJECT_ENVIRONMENT"] = str(
+                ROOT / f".venv-{binding}-py{version.replace('.', '')}"
+            )
+            run(
+                [
+                    "uv",
+                    "sync",
+                    "--locked",
+                    "--python",
+                    version,
+                    "--extra",
+                    binding,
+                ],
+                env=env,
+            )
+            run(
+                ["uv", "run", "--python", version, "--no-sync", "pytest"],
+                env=env,
+            )
 
 
 def development_constraints() -> list[str]:
@@ -257,6 +282,12 @@ def parse_args() -> argparse.Namespace:
     modes = parser.add_mutually_exclusive_group()
     for mode in ("fast", "matrix", "lowest", "smoke", "release"):
         modes.add_argument(f"--{mode}", action="store_true")
+    parser.add_argument(
+        "--binding",
+        choices=("pyside6", "pyqt6"),
+        default="pyside6",
+        help="Qt binding for wheel smoke",
+    )
     parser.add_argument("--wheel", type=Path)
     parser.add_argument("--python", default="3.11", help="smoke interpreter")
     return parser.parse_args()
@@ -274,12 +305,13 @@ def main() -> int:
             )
             if wheel is None:
                 raise ValueError("--smoke requires a built wheel or --wheel")
-            smoke(wheel.resolve(), args.python)
+            smoke(wheel.resolve(), args.python, args.binding)
         else:
             source_checks(fast=args.fast)
             if not args.fast:
                 wheel = build_distributions()
-                smoke(wheel, args.python)
+                for binding in ("pyside6", "pyqt6"):
+                    smoke(wheel, args.python, binding)
                 if not args.lowest:
                     matrix()
                 if args.lowest or args.release:

@@ -12,13 +12,13 @@ from typing import TYPE_CHECKING, TextIO
 
 from loguru import logger
 
+# pylint: enable=no-name-in-module
+from serialforge.models import LogConfig
+
 # PySide6 exposes these C++ types through generated bindings, which pylint
 # cannot resolve even though ty and Python imports can.
 # pylint: disable=no-name-in-module
-from PySide6.QtCore import QCoreApplication, QStandardPaths
-
-# pylint: enable=no-name-in-module
-from serialforge.models import LogConfig
+from serialforge.qt_core import QCoreApplication, QStandardPaths
 
 if TYPE_CHECKING:
     from loguru import Message, Record

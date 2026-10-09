@@ -9,7 +9,6 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import QCoreApplication, Qt
 
 from serialforge import (
     CommandSpec,
@@ -22,6 +21,7 @@ from serialforge.discovery import DeviceFinder
 from serialforge.discovery.baud_cache import BaudCache
 from serialforge.enums import FramingMode
 from serialforge.errors import ProbeError
+from serialforge.qt_core import QCoreApplication, Qt
 from serialforge.transport import PortRegistry
 from tests.support import FakeBackend, SimulatedDevice, use_fake_backend
 from tests.support.recording_backend import RecordingBackend

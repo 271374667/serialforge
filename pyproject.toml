@@ -5,14 +5,13 @@ build-backend = "hatchling.build"
 [project]
 name = "serialforge"
 version = "0.0.1"
-description = "PySide6 serial communication toolkit for Windows"
+description = "Qt6 Core serial communication toolkit for Windows"
 readme = "README.md"
 license = { text = "MIT" }
 license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = [
     "loguru>=0.7",
-    "PySide6-Essentials>=6.11.2",
     "pyserial>=3.5",
 ]
 classifiers = [
@@ -26,8 +25,13 @@ classifiers = [
     "Typing :: Typed",
 ]
 
+[project.optional-dependencies]
+pyside6 = ["PySide6-Essentials>=6.11.2"]
+pyqt6 = ["PyQt6>=6.11"]
+
 [dependency-groups]
 dev = [
+    "PySide6-Essentials>=6.11.2",
     "pylint",
     "pytest",
     "pytest-qt",

@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
+# Completion is a private ticket hook; public delivery is queued by the facade.
+# pylint: disable=protected-access
 import re
 import threading
 import time
 import uuid
 from collections import deque
 from collections.abc import Callable, Mapping
+from types import MappingProxyType
 from typing import Any
-
-# pylint: disable=no-name-in-module
-from PySide6.QtCore import QObject, Signal
 
 from serialforge.advanced import CommandTicket, HandlerStats, RuntimeConfig
 from serialforge.connection.command_registry import CommandRegistry
@@ -25,13 +25,17 @@ from serialforge.enums import (
     SendRoute,
     TimeoutPolicy,
 )
-from serialforge.errors import CommandError
+from serialforge.errors import CommandError, _without_tracebacks
 from serialforge.models import (
     CommandResult,
     CommandSpec,
     DeviceEvent,
     DeviceProfile,
+    _freeze_context,
 )
+
+# pylint: disable=no-name-in-module
+from serialforge.qt_core import QObject, Signal
 from serialforge.transport import LatencyTracker
 
 
@@ -49,6 +53,7 @@ class CommandDispatcher(QObject):
     event_received = Signal(object)
     error_occurred = Signal(object)
     tx_written = Signal(bytes, object, object)
+    response_frame = Signal(object)
 
     def __init__(
         self,
@@ -75,7 +80,12 @@ class CommandDispatcher(QObject):
         self._connected: bool = False
         self._reconnecting: bool = False
         self._retry_after_reconnect: list[
-            tuple[CommandSpec, Mapping[str, object], CommandPriority]
+            tuple[
+                CommandSpec,
+                Mapping[str, object],
+                CommandPriority,
+                Mapping[str, object],
+            ]
         ] = []
         self._last_write_at: float | None = None
         self._drain_until: float = 0.0
@@ -120,12 +130,16 @@ class CommandDispatcher(QObject):
             elif self._retry_after_reconnect:
                 retry = tuple(self._retry_after_reconnect)
                 self._retry_after_reconnect.clear()
-                for spec, params, priority in retry:
+                for spec, params, priority, context in retry:
                     if self._registry.contains(spec):
                         # Placeholder values are intentionally opaque objects;
                         # ``submit`` validates their string rendering.
-                        # ty: ignore[invalid-argument-type] -- retry params are command values.
-                        self.submit(spec, priority=priority, **params)
+                        self.submit(
+                            spec,
+                            priority=priority,
+                            _params=params,
+                            _context=context,
+                        )
 
     def set_clear_input(self, clear_input: Callable[[], None]) -> None:
         """Provide the transport's input-buffer drain action."""
@@ -143,7 +157,13 @@ class CommandDispatcher(QObject):
                 active.append(self._writing_pending)
             for pending in active:
                 if pending.ticket is ticket:
-                    self._finish(pending, status)
+                    if (
+                        status is CommandStatus.TIMEOUT
+                        and pending.started_at is not None
+                    ):
+                        self.timeout(pending, self._clock())
+                    else:
+                        self._finish(pending, status)
                     return
 
     # Validation must distinguish spec, matched text, and raw text paths.
@@ -154,6 +174,12 @@ class CommandDispatcher(QObject):
         *,
         priority: CommandPriority = CommandPriority.NORMAL,
         allow_raw_text: bool = True,
+        _ticket_factory: Callable[
+            [str, CommandSpec | None, SendRoute], CommandTicket
+        ]
+        | None = None,
+        _params: Mapping[str, object] | None = None,
+        _context: Mapping[str, object] = MappingProxyType({}),
         **params: object,
     ) -> CommandTicket:
         """Validate and enqueue a command without performing an I/O write.
@@ -161,6 +187,8 @@ class CommandDispatcher(QObject):
         Raises:
             CommandError: If the declaration, text, or parameters are invalid.
         """
+        if _params is not None:
+            params = dict(_params)
         spec: CommandSpec | None
         route: SendRoute
         actual_params: Mapping[str, object]
@@ -195,7 +223,10 @@ class CommandDispatcher(QObject):
         if not isinstance(priority, CommandPriority):
             raise CommandError("priority must be CommandPriority")
         now = self._clock()
-        ticket = CommandTicket(uuid.uuid4().hex, spec, route)
+        ticket = (_ticket_factory or CommandTicket)(
+            uuid.uuid4().hex, spec, route
+        )
+        ticket.context = _freeze_context(_context)
         with self._lock:
             self._sequence += 1
             pending = PendingCommand(
@@ -272,6 +303,9 @@ class CommandDispatcher(QObject):
                 for pending in tuple(
                     self._queue + self._inflight + self._streams
                 ):
+                    if now >= pending.ticket.deadline:
+                        self.timeout(pending, now)
+                        continue
                     if pending.ticket.cancelled:
                         self._finish(pending, CommandStatus.CANCELLED)
                         continue
@@ -281,7 +315,7 @@ class CommandDispatcher(QObject):
                     elapsed = now - pending.started_at
                     if (
                         spec.total_timeout_s is not None
-                        and elapsed >= spec.total_timeout_s
+                        and 0 < spec.total_timeout_s <= elapsed
                     ):
                         self.timeout(pending, now)
                     elif (
@@ -365,7 +399,7 @@ class CommandDispatcher(QObject):
             for pending in tuple(self._inflight):
                 spec = pending.spec
                 assert spec is not None
-                if spec.error_pattern is not None and re.fullmatch(
+                if bool(spec.error_pattern) and re.fullmatch(
                     spec.error_pattern, text
                 ):
                     pending.raw_frames.append(frame)
@@ -373,7 +407,7 @@ class CommandDispatcher(QObject):
                         pending, CommandStatus.DEVICE_ERROR, error_message=text
                     )
                     return
-                if spec.mode is ResponseMode.MULTI and spec.until is not None:
+                if spec.mode is ResponseMode.MULTI and bool(spec.until):
                     if re.fullmatch(spec.until, text):
                         pending.raw_frames.append(frame)
                         self._finish(pending, CommandStatus.OK)
@@ -390,10 +424,13 @@ class CommandDispatcher(QObject):
                 if pending.first_frame_at is None:
                     pending.first_frame_at = now
                 pending.values.append(data)
+                self.response_frame.emit(
+                    (pending.ticket, frame, data, now, pending.params)
+                )
                 if spec.mode is ResponseMode.SINGLE or (
                     spec.mode is ResponseMode.MULTI
                     and spec.count is not None
-                    and len(pending.values) >= spec.count
+                    and 0 < spec.count <= len(pending.values)
                 ):
                     self._finish(pending, CommandStatus.OK)
                 return
@@ -402,7 +439,7 @@ class CommandDispatcher(QObject):
                 assert spec is not None
                 if spec.pattern is None:
                     continue
-                if spec.error_pattern is not None and re.fullmatch(
+                if bool(spec.error_pattern) and re.fullmatch(
                     spec.error_pattern, text
                 ):
                     pending.raw_frames.append(frame)
@@ -420,6 +457,7 @@ class CommandDispatcher(QObject):
                         DeviceEvent(
                             spec=spec,
                             request_id=pending.ticket.request_id,
+                            context=pending.ticket.context,
                             data=data,
                             raw_frame=frame,
                             timestamp=now,
@@ -452,6 +490,7 @@ class CommandDispatcher(QObject):
                         DeviceEvent(
                             spec=spec,
                             request_id=pending.ticket.request_id,
+                            context=pending.ticket.context,
                             data=text,
                             raw_frame=frame,
                             timestamp=now,
@@ -467,9 +506,8 @@ class CommandDispatcher(QObject):
                     pending.last_frame_at = now
                     if pending.first_frame_at is None:
                         pending.first_frame_at = now
-                    if (
-                        spec.count is not None
-                        and len(pending.values) >= spec.count
+                    if spec.count is not None and 0 < spec.count <= len(
+                        pending.values
                     ):
                         self._finish(pending, CommandStatus.OK)
                     return
@@ -517,7 +555,10 @@ class CommandDispatcher(QObject):
         except CommandError as exc:
             pending.raw_frames.append(frame)
             self._finish(
-                pending, CommandStatus.PARSE_ERROR, error_message=str(exc)
+                pending,
+                CommandStatus.PARSE_ERROR,
+                error_message=str(exc),
+                cause=exc,
             )
             return False, None
 
@@ -525,6 +566,9 @@ class CommandDispatcher(QObject):
         """Write one invocation and mark its response deadline."""
         with self._lock:
             if pending.finished:
+                return
+            if self._clock() >= pending.ticket.deadline:
+                self._finish(pending, CommandStatus.TIMEOUT)
                 return
             pending.started_at = now
             spec = pending.spec
@@ -547,6 +591,7 @@ class CommandDispatcher(QObject):
                     pending,
                     CommandStatus.DISCONNECTED,
                     error_message=str(exc),
+                    cause=exc,
                 )
             return
         with self._lock:
@@ -577,7 +622,7 @@ class CommandDispatcher(QObject):
             and not pending.finished
         ):
             self._retry_after_reconnect.append(
-                (spec, pending.params, pending.priority)
+                (spec, pending.params, pending.priority, pending.ticket.context)
             )
 
     def timeout(self, pending: PendingCommand, now: float) -> None:
@@ -585,7 +630,11 @@ class CommandDispatcher(QObject):
         spec = pending.spec
         if spec is not None and spec.timeout_s is TimeoutPolicy.AUTO:
             self._auto_rto = min(self._runtime.rto_max_s, self._auto_rto * 2)
-        if spec is not None and spec.correlation is Correlation.EXCLUSIVE:
+        if (
+            spec is not None
+            and spec.correlation is Correlation.EXCLUSIVE
+            and pending.started_at is not None
+        ):
             self._drain_until = now + self._runtime.post_timeout_drain_s
         self._finish(pending, CommandStatus.TIMEOUT)
 
@@ -595,10 +644,23 @@ class CommandDispatcher(QObject):
         status: CommandStatus,
         *,
         error_message: str | None = None,
+        cause: Exception | None = None,
     ) -> None:
         """Publish exactly one terminal result for an accepted ticket."""
         if pending.finished:
             return
+        if (
+            status is CommandStatus.OK
+            and self._clock() >= pending.ticket.deadline
+        ):
+            status = CommandStatus.TIMEOUT
+            if (
+                pending.spec is not None
+                and pending.spec.correlation is Correlation.EXCLUSIVE
+            ):
+                self._drain_until = (
+                    self._clock() + self._runtime.post_timeout_drain_s
+                )
         pending.finished = True
         for collection in (self._queue, self._inflight, self._streams):
             if pending in collection:
@@ -629,6 +691,7 @@ class CommandDispatcher(QObject):
                 data = pending.values[0]
         result = CommandResult(
             spec=pending.spec,
+            context=pending.ticket.context,
             route=pending.route,
             params=pending.params,
             sent=pending.sent if pending.started_at is not None else b"",
@@ -640,13 +703,18 @@ class CommandDispatcher(QObject):
             else 0.0,
             request_id=pending.ticket.request_id,
             error_message=error_message,
+            cause=_without_tracebacks(cause) if cause is not None else None,
         )
+        pending.ticket._complete(result)
         self.command_finished.emit(result)
 
     def enqueue_event(self, event: DeviceEvent) -> None:
         """Retain bounded event traffic until the next emission interval."""
         if len(self._events) >= self._runtime.event_queue_high_water:
-            if isinstance(event.spec, CommandSpec):
+            if (
+                isinstance(event.spec, CommandSpec)
+                and event.spec.mode is ResponseMode.STREAM
+            ):
                 for index, queued in enumerate(self._events):
                     if queued.spec is event.spec:
                         del self._events[index]
@@ -654,7 +722,10 @@ class CommandDispatcher(QObject):
                         break
                 else:
                     for index, queued in enumerate(self._events):
-                        if isinstance(queued.spec, CommandSpec):
+                        if (
+                            isinstance(queued.spec, CommandSpec)
+                            and queued.spec.mode is ResponseMode.STREAM
+                        ):
                             del self._events[index]
                             self._dropped_events += 1
                             break
@@ -664,7 +735,10 @@ class CommandDispatcher(QObject):
                 self._events.append(event)
                 return
             for index, queued in enumerate(self._events):
-                if isinstance(queued.spec, CommandSpec):
+                if (
+                    isinstance(queued.spec, CommandSpec)
+                    and queued.spec.mode is ResponseMode.STREAM
+                ):
                     del self._events[index]
                     break
             else:

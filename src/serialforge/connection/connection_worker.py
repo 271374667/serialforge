@@ -9,9 +9,6 @@ import time
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
-# pylint: disable=no-name-in-module
-from PySide6.QtCore import Qt, QThread
-
 from serialforge.advanced import (
     FramingConfig,
     ProbeSpec,
@@ -31,24 +28,27 @@ from serialforge.enums import (
 from serialforge.errors import PortNotFoundError, SerialForgeError
 from serialforge.models import CommandResult, CommandSpec, DeviceInfo
 from serialforge.protocols import TransportProtocol
+
+# pylint: disable=no-name-in-module
+from serialforge.qt_core import Qt, QThread
 from serialforge.transport import BackendSwitch, PortOptions, PortRegistry
 
 # The worker coordinates the facade's private state across Qt threads.
 # pylint: disable=protected-access,too-many-instance-attributes
 
 if TYPE_CHECKING:
-    from serialforge.connection.serial_handler import SerialHandler
+    from serialforge.connection.handler_core import HandlerCore
 
 
 class ConnectionWorker(QThread):
     """Own connection attempts, command pumping, and automatic recovery."""
 
     def __init__(
-        self, handler: SerialHandler, target: str | DeviceInfo | None
+        self, handler: HandlerCore, target: str | DeviceInfo | None
     ) -> None:
         """Create a stopped worker for one explicit connection session."""
         super().__init__()
-        self._handler: SerialHandler = handler
+        self._handler: HandlerCore = handler
         self._target: str | DeviceInfo | None = target
         self._stop: threading.Event = threading.Event()
         self._io_failed: threading.Event = threading.Event()
@@ -136,6 +136,8 @@ class ConnectionWorker(QThread):
             raise RuntimeError("serial transport is not connected")
         try:
             written = transport.write(data)
+            if written > 0:
+                self._handler.raw_sent.emit(data[:written])
             if written != len(data):
                 self._io_failed.set()
             return written
@@ -229,6 +231,10 @@ class ConnectionWorker(QThread):
             return target
         self._handler._transition(ConnectionState.PROBING)
         finder = DeviceFinder(self._handler._profile)
+        finder._strict_errors = True
+        finder._preserve_cancel = True
+        finder._raw_received = self._handler.raw_received.emit
+        finder._raw_sent = self._handler.raw_sent.emit
         self._finder = finder
         try:
             if self._stop.is_set():

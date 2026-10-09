@@ -5,19 +5,19 @@ from __future__ import annotations
 import threading
 from typing import TYPE_CHECKING
 
-# pylint: disable=no-name-in-module
-from PySide6.QtCore import QThread
-
 from serialforge.advanced import FramingConfig
 from serialforge.errors import FramingError
 from serialforge.protocols import TransportProtocol
+
+# pylint: disable=no-name-in-module
+from serialforge.qt_core import QThread
 from serialforge.transport import FrameSplitter
 
 # The read loop reports frames to its owning facade through private hooks.
 # pylint: disable=protected-access
 
 if TYPE_CHECKING:
-    from serialforge.connection.serial_handler import SerialHandler
+    from serialforge.connection.handler_core import HandlerCore
 
 
 class ReadThread(QThread):
@@ -25,13 +25,13 @@ class ReadThread(QThread):
 
     def __init__(
         self,
-        handler: SerialHandler,
+        handler: HandlerCore,
         transport: TransportProtocol,
         config: FramingConfig,
     ) -> None:
         """Bind a transport, frame boundary, and receiver."""
         super().__init__()
-        self._handler: SerialHandler = handler
+        self._handler: HandlerCore = handler
         self._transport: TransportProtocol = transport
         self._splitter: FrameSplitter = FrameSplitter(config)
         self._stop: threading.Event = threading.Event()
@@ -50,6 +50,8 @@ class ReadThread(QThread):
             while not self._stop.is_set():
                 poll = self._handler._dispatcher.stats().poll_interval_s or 0.05
                 chunk = self._transport.read(1, min(poll, 0.05))
+                if chunk:
+                    self._handler.raw_received.emit(chunk)
                 if self._stop.is_set():
                     break
                 if chunk:
@@ -58,6 +60,7 @@ class ReadThread(QThread):
                         extra = self._transport.read(4096, 0.0)
                         if not extra:
                             break
+                        self._handler.raw_received.emit(extra)
                         parts.append(extra)
                     for frame in self._splitter.feed(b"".join(parts)):
                         self._handler._receive_frame(frame)

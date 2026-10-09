@@ -1,5 +1,9 @@
 {
   "serialforge": [
+    "SerialForge",
+    "Spec",
+    "Message",
+    "MessageCategory",
     "SerialHandler",
     "DeviceFinder",
     "DeviceProfile",
@@ -33,7 +37,12 @@
     "TrafficRecord",
     "ReadLoopConfig",
     "RuntimeConfig",
-    "HandlerStats"
+    "HandlerStats",
+    "CommandCall",
+    "SpecRole",
+    "DeviceProfile",
+    "LogConfig",
+    "DeviceFinder"
   ],
   "errors": [
     "SerialForgeError",
@@ -43,35 +52,278 @@
     "ProbeError",
     "FramingError",
     "CommandError",
-    "ConfigError"
+    "ConfigError",
+    "CommandExecutionError",
+    "CommandTimeoutError",
+    "CommandCancelledError",
+    "CommandBusyError",
+    "CommandDisconnectedError",
+    "CommandParseError",
+    "DeviceCommandError",
+    "CommandNotReadyError"
   ],
   "classes": {
-    "serialforge.SerialHandler": {
+    "serialforge.SerialForge": {
+      "overloads": {
+        "configure": [
+          "(self, profile: 'DeviceProfile', /) -> 'None'",
+          "(self, /, *, baudrates: 'Sequence[int]', probe: 'Spec[Any] | ProbeSpec', vid_pid: 'Sequence[tuple[int, int]]' = (), name: 'str' = '', terminator: 'str' = '\\r\\n', encoding: 'str' = 'utf-8', echo: 'bool' = False, heartbeat_s: 'float' = -1.0, serial: 'SerialConfig | None' = None, framing: 'FramingConfig | None' = None, runtime: 'RuntimeConfig | None' = None) -> 'None'",
+          "(self, /, *, baudrates: 'Sequence[int]', probe: 'str', probe_pattern: 'str', probe_timeout_s: 'float' = 1.0, vid_pid: 'Sequence[tuple[int, int]]' = (), name: 'str' = '', terminator: 'str' = '\\r\\n', encoding: 'str' = 'utf-8', echo: 'bool' = False, heartbeat_s: 'float' = -1.0, serial: 'SerialConfig | None' = None, framing: 'FramingConfig | None' = None, runtime: 'RuntimeConfig | None' = None) -> 'None'"
+        ],
+        "add": [
+          "(self, spec: 'Spec[T]', /) -> 'Spec[T]'",
+          "(self, spec: 'CommandSpec | EventSpec', /) -> 'CommandSpec | EventSpec'",
+          "(self, request: 'str', pattern: 'str', result_type: 'type[T]', **options: 'Any') -> 'Spec[T]'",
+          "(self, request: 'str', pattern: 'str', **options: 'Any') -> 'Spec[str]'",
+          "(self, request: 'str', pattern: 'str', *, name: 'str' = '', mode: 'ResponseMode' = <ResponseMode.SINGLE: 'single'>, correlation: 'Correlation' = <Correlation.EXCLUSIVE: 'exclusive'>, count: 'int' = -1, until: 'str' = '', error_pattern: 'str' = '', timeout_s: 'float | TimeoutPolicy' = 1.0, idle_timeout_s: 'float' = 0.3, total_timeout_s: 'float' = -1.0, idempotent: 'bool' = False, parser: \"Callable[[str], str] | Literal['']\" = '') -> 'Spec[str]'",
+          "(self, request: 'str', pattern: 'str', result_type: 'type[T]', *, name: 'str' = '', mode: 'ResponseMode' = <ResponseMode.SINGLE: 'single'>, correlation: 'Correlation' = <Correlation.EXCLUSIVE: 'exclusive'>, count: 'int' = -1, until: 'str' = '', error_pattern: 'str' = '', timeout_s: 'float | TimeoutPolicy' = 1.0, idle_timeout_s: 'float' = 0.3, total_timeout_s: 'float' = -1.0, idempotent: 'bool' = False, parser: \"Callable[[str], T] | Literal['']\" = '') -> 'Spec[T]'",
+          "(self, request: 'str', *, mode: 'Literal[ResponseMode.NO_REPLY]', name: 'str' = '', idempotent: 'bool' = False) -> 'Spec[Any]'",
+          "(self, *, pattern: 'str', result_type: 'type[T]', name: 'str' = '', parser: \"Callable[[str], T] | Literal['']\" = '') -> 'Spec[T]'",
+          "(self, *, pattern: 'str', name: 'str' = '', parser: \"Callable[[str], str] | Literal['']\" = '') -> 'Spec[str]'"
+        ],
+        "scan": [
+          "(self, /, *, mode: 'ScanMode' = <ScanMode.ALL: 'all'>, port: 'str' = '') -> 'list[DeviceInfo]'",
+          "(self, profile: 'DeviceProfile', /, *, mode: 'ScanMode' = <ScanMode.ALL: 'all'>, port: 'str' = '') -> 'list[DeviceInfo]'",
+          "(self, /, *, mode: 'ScanMode' = <ScanMode.ALL: 'all'>, port: 'str' = '', baudrates: 'Sequence[int]', probe: 'Spec[Any] | ProbeSpec', vid_pid: 'Sequence[tuple[int, int]]' = (), name: 'str' = '', terminator: 'str' = '\\r\\n', encoding: 'str' = 'utf-8', echo: 'bool' = False, heartbeat_s: 'float' = -1.0, serial: 'SerialConfig | None' = None, framing: 'FramingConfig | None' = None, runtime: 'RuntimeConfig | None' = None) -> 'list[DeviceInfo]'",
+          "(self, /, *, mode: 'ScanMode' = <ScanMode.ALL: 'all'>, port: 'str' = '', baudrates: 'Sequence[int]', probe: 'str', probe_pattern: 'str', probe_timeout_s: 'float' = 1.0, vid_pid: 'Sequence[tuple[int, int]]' = (), name: 'str' = '', terminator: 'str' = '\\r\\n', encoding: 'str' = 'utf-8', echo: 'bool' = False, heartbeat_s: 'float' = -1.0, serial: 'SerialConfig | None' = None, framing: 'FramingConfig | None' = None, runtime: 'RuntimeConfig | None' = None) -> 'list[DeviceInfo]'"
+        ],
+        "send_async": [
+          "(self, target: 'Spec[T]', /, *, timeout_s: 'float' = 3.0, priority: 'CommandPriority' = <CommandPriority.NORMAL: 0>, params: 'Mapping[str, object]' = mappingproxy({}), context: 'Mapping[str, object]' = mappingproxy({})) -> 'CommandCall[T]'",
+          "(self, target: 'CommandSpec | str', /, *, timeout_s: 'float' = 3.0, priority: 'CommandPriority' = <CommandPriority.NORMAL: 0>, params: 'Mapping[str, object]' = mappingproxy({}), context: 'Mapping[str, object]' = mappingproxy({})) -> 'CommandCall[Any]'"
+        ],
+        "send_sync": [
+          "(self, target: 'Spec[T]', /, *, wait_timeout_s: 'float' = 3.0, priority: 'CommandPriority' = <CommandPriority.NORMAL: 0>, params: 'Mapping[str, object]' = mappingproxy({}), context: 'Mapping[str, object]' = mappingproxy({})) -> 'Message[T]'",
+          "(self, target: 'CommandSpec | str', /, *, wait_timeout_s: 'float' = 3.0, priority: 'CommandPriority' = <CommandPriority.NORMAL: 0>, params: 'Mapping[str, object]' = mappingproxy({}), context: 'Mapping[str, object]' = mappingproxy({})) -> 'Message[Any]'"
+        ]
+      },
       "methods": {
-        "__init__": "(self, profile: 'DeviceProfile', *, log: 'LogConfig | None' = None, allow_raw_text: 'bool' = True) -> 'None'",
-        "connect": "(self, target: 'str | DeviceInfo | None' = None) -> 'None'",
+        "__init__": "(self, profile: 'DeviceProfile | None' = None, *, log: 'LogConfig | None' = None, allow_raw_text: 'bool' = True, application: \"Literal['existing', 'core']\" = 'existing') -> 'None'",
+        "configure": "(self, profile: 'DeviceProfile | None' = None, /, **fields: 'Any') -> 'None'",
+        "add": "(self, *args: 'Any', **options: 'Any') -> 'CommandSpec | EventSpec'",
+        "remove": "(self, spec: 'CommandSpec | EventSpec', /) -> 'None'",
+        "scan": "(self, profile: 'DeviceProfile | None' = None, /, *, mode: 'ScanMode' = <ScanMode.ALL: 'all'>, port: 'str' = '', **fields: 'Any') -> 'list[DeviceInfo]'",
+        "cancel_scan": "(self) -> 'None'",
+        "connect": "(self, target: 'str | DeviceInfo' = '') -> 'None'",
         "disconnect": "(self) -> 'None'",
-        "register": "(self, *specs: 'CommandSpec | EventSpec') -> 'None'",
-        "unregister": "(self, spec: 'CommandSpec | EventSpec') -> 'None'",
-        "set_init_sequence": "(self, items: 'list[CommandSpec | str]') -> 'None'",
-        "send": "(self, target: 'CommandSpec | str', /, *, priority: 'CommandPriority | None' = None, **params: 'object') -> 'CommandTicket'",
-        "send_and_wait": "(self, target: 'CommandSpec | str', /, *, timeout: 'float', **params: 'object') -> 'CommandResult'",
+        "send_async": "(self, target: 'CommandSpec | str', /, *, timeout_s: 'float' = 3.0, priority: 'CommandPriority' = <CommandPriority.NORMAL: 0>, params: 'Mapping[str, object]' = mappingproxy({}), context: 'Mapping[str, object]' = mappingproxy({})) -> 'CommandCall[Any]'",
+        "send_sync": "(self, target: 'CommandSpec | str', /, *, wait_timeout_s: 'float' = 3.0, priority: 'CommandPriority' = <CommandPriority.NORMAL: 0>, params: 'Mapping[str, object]' = mappingproxy({}), context: 'Mapping[str, object]' = mappingproxy({})) -> 'Message[Any]'",
+        "set_init_sequence": "(self, items: 'Sequence[CommandSpec | str]') -> 'None'",
         "set_log_config": "(self, config: 'LogConfig') -> 'None'",
-        "stats": "(self) -> 'HandlerStats'"
+        "stats": "(self) -> 'HandlerStats'",
+        "check_errors": "(self) -> 'None'"
       },
       "properties": {
         "state": "(self) -> 'ConnectionState'"
       },
       "signals": {
-        "connection_state_changed": "Signal(ConnectionState)",
-        "command_finished": "Signal(object)",
-        "event_received": "Signal(object)",
-        "traffic_logged": "Signal(object)",
-        "error_occurred": "Signal(object)"
+        "received": "Signal(object)",
+        "raw_sent": "Signal(bytes)",
+        "connection_state_changed": "Signal(object)"
       },
       "attributes": {}
     },
+    "serialforge.Spec": {
+      "overloads": {
+        "__init__": [
+          "(self: 'Spec[str]', request: 'str', pattern: 'str', *, name: 'str' = '', mode: 'ResponseMode' = <ResponseMode.SINGLE: 'single'>, correlation: 'Correlation' = <Correlation.EXCLUSIVE: 'exclusive'>, count: 'int' = -1, until: 'str' = '', error_pattern: 'str' = '', timeout_s: 'float | TimeoutPolicy' = 1.0, idle_timeout_s: 'float' = 0.3, total_timeout_s: 'float' = -1.0, idempotent: 'bool' = False, parser: \"Callable[[str], str] | Literal['']\" = '') -> 'None'",
+          "(self, request: 'str', pattern: 'str', result_type: 'type[T]', *, name: 'str' = '', mode: 'ResponseMode' = <ResponseMode.SINGLE: 'single'>, correlation: 'Correlation' = <Correlation.EXCLUSIVE: 'exclusive'>, count: 'int' = -1, until: 'str' = '', error_pattern: 'str' = '', timeout_s: 'float | TimeoutPolicy' = 1.0, idle_timeout_s: 'float' = 0.3, total_timeout_s: 'float' = -1.0, idempotent: 'bool' = False, parser: \"Callable[[str], T] | Literal['']\" = '') -> 'None'",
+          "(self, request: 'str', *, mode: 'Literal[ResponseMode.NO_REPLY]', name: 'str' = '', idempotent: 'bool' = False) -> 'None'",
+          "(self: 'Spec[str]', *, pattern: 'str', name: 'str' = '', parser: \"Callable[[str], str] | Literal['']\" = '') -> 'None'",
+          "(self, *, pattern: 'str', result_type: 'type[T]', name: 'str' = '', parser: \"Callable[[str], T] | Literal['']\" = '') -> 'None'"
+        ]
+      },
+      "methods": {
+        "__init__": "(self, *args: 'Any', **kwargs: 'Any') -> 'None'"
+      },
+      "properties": {
+        "placeholders": "(self) -> 'tuple[str, ...]'"
+      },
+      "signals": {},
+      "fields": [
+        {
+          "name": "request",
+          "type": "str",
+          "kw_only": false
+        },
+        {
+          "name": "pattern",
+          "type": "str",
+          "kw_only": false
+        },
+        {
+          "name": "result_type",
+          "type": "type[T]",
+          "kw_only": false
+        },
+        {
+          "name": "name",
+          "type": "str",
+          "kw_only": false
+        },
+        {
+          "name": "mode",
+          "type": "ResponseMode",
+          "kw_only": false
+        },
+        {
+          "name": "correlation",
+          "type": "Correlation",
+          "kw_only": true
+        },
+        {
+          "name": "count",
+          "type": "int",
+          "kw_only": false
+        },
+        {
+          "name": "until",
+          "type": "str",
+          "kw_only": false
+        },
+        {
+          "name": "error_pattern",
+          "type": "str",
+          "kw_only": false
+        },
+        {
+          "name": "timeout_s",
+          "type": "float | TimeoutPolicy",
+          "kw_only": true
+        },
+        {
+          "name": "idle_timeout_s",
+          "type": "float",
+          "kw_only": true
+        },
+        {
+          "name": "total_timeout_s",
+          "type": "float",
+          "kw_only": false
+        },
+        {
+          "name": "idempotent",
+          "type": "bool",
+          "kw_only": true
+        },
+        {
+          "name": "parser",
+          "type": "Callable[[str], T] | Literal['']",
+          "kw_only": false
+        },
+        {
+          "name": "role",
+          "type": "SpecRole",
+          "kw_only": false
+        }
+      ]
+    },
+    "serialforge.Message": {
+      "overloads": {},
+      "methods": {
+        "__init__": "(self, category: 'MessageCategory', timestamp: 'float', data: 'T | list[T] | None' = None, spec: 'CommandSpec | EventSpec | None' = None, request_id: 'str' = '', raw_frames: 'tuple[bytes, ...]' = (), raw_data: 'bytes' = b'', context: 'Mapping[str, object]' = <factory>, status: 'CommandStatus' = <CommandStatus.NONE: 'none'>, route: 'SendRoute' = <SendRoute.NONE: 'none'>, params: 'Mapping[str, object]' = <factory>, sent: 'bytes' = b'', elapsed_s: 'float' = -1.0, error_message: 'str' = '') -> None"
+      },
+      "properties": {
+        "ok": "(self) -> 'bool'",
+        "raw_frame": "(self) -> 'bytes'"
+      },
+      "signals": {},
+      "fields": [
+        {
+          "name": "category",
+          "type": "MessageCategory",
+          "kw_only": false
+        },
+        {
+          "name": "timestamp",
+          "type": "float",
+          "kw_only": false
+        },
+        {
+          "name": "data",
+          "type": "T | list[T] | None",
+          "kw_only": false
+        },
+        {
+          "name": "spec",
+          "type": "CommandSpec | EventSpec | None",
+          "kw_only": false
+        },
+        {
+          "name": "request_id",
+          "type": "str",
+          "kw_only": false
+        },
+        {
+          "name": "raw_frames",
+          "type": "tuple[bytes, ...]",
+          "kw_only": false
+        },
+        {
+          "name": "raw_data",
+          "type": "bytes",
+          "kw_only": false
+        },
+        {
+          "name": "context",
+          "type": "Mapping[str, object]",
+          "kw_only": false
+        },
+        {
+          "name": "status",
+          "type": "CommandStatus",
+          "kw_only": false
+        },
+        {
+          "name": "route",
+          "type": "SendRoute",
+          "kw_only": false
+        },
+        {
+          "name": "params",
+          "type": "Mapping[str, object]",
+          "kw_only": false
+        },
+        {
+          "name": "sent",
+          "type": "bytes",
+          "kw_only": false
+        },
+        {
+          "name": "elapsed_s",
+          "type": "float",
+          "kw_only": false
+        },
+        {
+          "name": "error_message",
+          "type": "str",
+          "kw_only": false
+        }
+      ]
+    },
+    "serialforge.MessageCategory": {
+      "members": {
+        "COMMAND_RESULT": "command_result",
+        "RESPONSE_FRAME": "response_frame",
+        "DEVICE_EVENT": "device_event",
+        "STREAM_FRAME": "stream_frame",
+        "UNKNOWN_FRAME": "unknown_frame",
+        "RAW_RECEIVE": "raw_receive"
+      }
+    },
+    "serialforge.SerialHandler": {
+      "overloads": {},
+      "methods": {
+        "register": "(self, *specs: serialforge.models.CommandSpec | serialforge.models.EventSpec) -> None",
+        "unregister": "(self, spec: serialforge.models.CommandSpec | serialforge.models.EventSpec) -> None",
+        "send": "(self, target: serialforge.models.CommandSpec | str, /, *, priority: serialforge.enums.CommandPriority = <CommandPriority.NORMAL: 0>, **params: object) -> serialforge.connection.command_call.CommandCall[typing.Any]",
+        "send_and_wait": "(self, target: serialforge.models.CommandSpec | str, /, *, timeout: float, **params: object) -> serialforge.message.Message[typing.Any]"
+      },
+      "properties": {},
+      "signals": {},
+      "attributes": {}
+    },
     "serialforge.DeviceFinder": {
+      "overloads": {},
       "methods": {
         "__init__": "(self, profile: 'DeviceProfile') -> 'None'",
         "find": "(self, mode: 'ScanMode' = <ScanMode.ALL: 'all'>, *, port: 'str | None' = None) -> 'list[DeviceInfo]'",
@@ -87,6 +339,7 @@
       "attributes": {}
     },
     "serialforge.DeviceProfile": {
+      "overloads": {},
       "methods": {
         "__init__": "(self, vid_pid: 'Sequence[tuple[int, int]] | None' = None, baudrates: 'Sequence[int]' = (), probe: 'CommandSpec | object' = None, name: 'str | None' = None, terminator: 'str' = '\\r\\n', encoding: 'str' = 'utf-8', echo: 'bool' = False, heartbeat_s: 'float | None' = None, serial: 'SerialConfig | None' = None, framing: 'FramingConfig | None' = None, runtime: 'RuntimeConfig | None' = None) -> None"
       },
@@ -151,6 +404,7 @@
       ]
     },
     "serialforge.CommandSpec": {
+      "overloads": {},
       "methods": {
         "__init__": "(self, request: 'str', pattern: 'str | None' = None, result_type: 'type[Any] | None' = None, *, name: 'str | None' = None, mode: 'ResponseMode | None' = None, correlation: 'Correlation' = <Correlation.EXCLUSIVE: 'exclusive'>, count: 'int | None' = None, until: 'str | None' = None, error_pattern: 'str | None' = None, timeout_s: 'float | object' = 1.0, idle_timeout_s: 'float' = 0.3, total_timeout_s: 'float | None' = None, idempotent: 'bool' = False, parser: 'Callable[[str], Any] | None' = None) -> None"
       },
@@ -232,6 +486,7 @@
       ]
     },
     "serialforge.EventSpec": {
+      "overloads": {},
       "methods": {
         "__init__": "(self, pattern: 'str', result_type: 'type[Any] | None' = None, *, name: 'str | None' = None) -> None"
       },
@@ -256,6 +511,7 @@
       ]
     },
     "serialforge.LogConfig": {
+      "overloads": {},
       "methods": {
         "__init__": "(self, enabled: 'bool' = False, save_to_file: 'bool' = False, dir: 'Path | None' = None, app_name: 'str | None' = None, max_files: 'int' = 50, max_file_bytes: 'int' = 20971520) -> None"
       },
@@ -295,8 +551,9 @@
       ]
     },
     "serialforge.CommandResult": {
+      "overloads": {},
       "methods": {
-        "__init__": "(self, spec: 'CommandSpec | None' = None, route: 'SendRoute' = <SendRoute.SPEC: 'spec'>, params: 'Mapping[str, object]' = <factory>, sent: 'bytes' = b'', status: 'CommandStatus' = <CommandStatus.OK: 'ok'>, data: 'Any' = None, raw_frames: 'tuple[bytes | str, ...]' = (), elapsed_s: 'float' = 0.0, request_id: 'str | None' = None, error_message: 'str | None' = None) -> None"
+        "__init__": "(self, spec: 'CommandSpec | None' = None, route: 'SendRoute' = <SendRoute.SPEC: 'spec'>, params: 'Mapping[str, object]' = <factory>, sent: 'bytes' = b'', status: 'CommandStatus' = <CommandStatus.OK: 'ok'>, data: 'Any' = None, raw_frames: 'tuple[bytes | str, ...]' = (), elapsed_s: 'float' = 0.0, request_id: 'str | None' = None, error_message: 'str | None' = None, *, context: 'Mapping[str, object]' = <factory>, cause: 'Exception | None' = None) -> None"
       },
       "properties": {
         "ok": "(self) -> 'bool'"
@@ -312,6 +569,11 @@
           "name": "route",
           "type": "SendRoute",
           "kw_only": false
+        },
+        {
+          "name": "context",
+          "type": "Mapping[str, object]",
+          "kw_only": true
         },
         {
           "name": "params",
@@ -352,12 +614,18 @@
           "name": "error_message",
           "type": "str | None",
           "kw_only": false
+        },
+        {
+          "name": "cause",
+          "type": "Exception | None",
+          "kw_only": true
         }
       ]
     },
     "serialforge.DeviceEvent": {
+      "overloads": {},
       "methods": {
-        "__init__": "(self, spec: 'EventSpec | CommandSpec | None' = None, request_id: 'str | None' = None, data: 'Any' = None, raw_frame: 'bytes | str' = b'', timestamp: 'float' = 0.0) -> None"
+        "__init__": "(self, spec: 'EventSpec | CommandSpec | None' = None, request_id: 'str | None' = None, data: 'Any' = None, raw_frame: 'bytes | str' = b'', timestamp: 'float' = 0.0, context: 'Mapping[str, object]' = <factory>) -> None"
       },
       "properties": {},
       "signals": {},
@@ -386,10 +654,16 @@
           "name": "timestamp",
           "type": "float",
           "kw_only": false
+        },
+        {
+          "name": "context",
+          "type": "Mapping[str, object]",
+          "kw_only": false
         }
       ]
     },
     "serialforge.DeviceInfo": {
+      "overloads": {},
       "methods": {
         "__init__": "(self, port: 'str', vid: 'int | None' = None, pid: 'int | None' = None, serial_number: 'str | None' = None, location: 'str | None' = None, description: 'str | None' = None, baudrate: 'int | None' = None, response: 'bytes | str | None' = None, elapsed_s: 'float | None' = None) -> None"
       },
@@ -445,6 +719,7 @@
     },
     "serialforge.CommandStatus": {
       "members": {
+        "NONE": "none",
         "OK": "ok",
         "TIMEOUT": "timeout",
         "DISCONNECTED": "disconnected",
@@ -466,6 +741,7 @@
     },
     "serialforge.ResponseMode": {
       "members": {
+        "NONE": "none",
         "NO_REPLY": "no_reply",
         "SINGLE": "single",
         "MULTI": "multi",
@@ -485,12 +761,14 @@
       }
     },
     "serialforge.SerialForgeError": {
+      "overloads": {},
       "methods": {},
       "properties": {},
       "signals": {},
       "attributes": {}
     },
     "serialforge.advanced.SerialConfig": {
+      "overloads": {},
       "methods": {
         "__init__": "(self, data_bits: 'DataBits' = <DataBits.EIGHT: 8>, parity: 'Parity' = <Parity.NONE: 'N'>, stop_bits: 'StopBits' = <StopBits.ONE: '1'>, flow_control: 'FlowControl' = <FlowControl.NONE: 'none'>, write_timeout_s: 'float' = 1.0, rx_buffer_size: 'int | None' = None, dtr: 'bool | None' = None, rts: 'bool | None' = None, rs485_switch_delay_s: 'float | None' = None, settle_time_s: 'float' = 0.3) -> None"
       },
@@ -582,6 +860,7 @@
       }
     },
     "serialforge.advanced.ProbeSpec": {
+      "overloads": {},
       "methods": {
         "__init__": "(self, request: 'str', expect: 'str | Callable[[str], bool]', timeout_s: 'float' = 1.0, settle_time_s: 'float | None' = None) -> None"
       },
@@ -619,6 +898,7 @@
       }
     },
     "serialforge.advanced.FramingConfig": {
+      "overloads": {},
       "methods": {
         "__init__": "(self, mode: 'FramingMode' = <FramingMode.LINE: 'line'>, terminator: 'bytes' = b'\\r\\n', start_marker: 'bytes' = b'', end_marker: 'bytes' = b'', length_offset: 'int' = 0, length_size: 'int' = 2, byteorder: 'str' = 'little', max_frame_length: 'int' = 65536, max_buffer_bytes: 'int' = 262144, silence_gap_s: 'float | None' = None, checksum: 'Checksum' = <Checksum.NONE: 'none'>) -> None"
       },
@@ -700,6 +980,7 @@
       }
     },
     "serialforge.advanced.CommandTicket": {
+      "overloads": {},
       "methods": {
         "__init__": "(self, request_id: 'str', spec: 'object | None', route: 'SendRoute') -> 'None'",
         "cancel": "(self) -> 'None'"
@@ -711,11 +992,14 @@
       "attributes": {
         "request_id": "str",
         "spec": "object | None",
-        "route": "SendRoute"
+        "route": "SendRoute",
+        "context": "Mapping[str, object]",
+        "deadline": "float"
       }
     },
     "serialforge.advanced.SendRoute": {
       "members": {
+        "NONE": "none",
         "SPEC": "spec",
         "MATCHED": "matched",
         "RAW": "raw"
@@ -727,6 +1011,7 @@
       }
     },
     "serialforge.advanced.TrafficRecord": {
+      "overloads": {},
       "methods": {
         "__init__": "(self, direction: 'str', timestamp: 'float', port: 'str', data: 'bytes', route: 'SendRoute | None' = None, spec: 'object | None' = None) -> None"
       },
@@ -766,6 +1051,7 @@
       ]
     },
     "serialforge.advanced.ReadLoopConfig": {
+      "overloads": {},
       "methods": {
         "__init__": "(self, poll_min_s: 'float' = 0.005, poll_max_s: 'float' = 0.1, poll_initial_s: 'float' = 0.05, poll_factor: 'float' = 0.25, min_samples: 'int' = 5) -> None"
       },
@@ -800,6 +1086,7 @@
       ]
     },
     "serialforge.advanced.RuntimeConfig": {
+      "overloads": {},
       "methods": {
         "__init__": "(self, min_command_interval_s: 'float' = 0.0, queue_limit: 'int' = 256, post_timeout_drain_s: 'float' = 0.2, rto_min_s: 'float' = 0.05, rto_max_s: 'float' = 5.0, stream_emit_interval_ms: 'int' = 50, event_queue_high_water: 'int' = 1000, traffic_ring_size: 'int' = 1000, hex_truncate_bytes: 'int' = 64, resend_idempotent: 'bool' = False, queue_while_reconnecting: 'bool' = False, reconnect_initial_s: 'float' = 0.5, reconnect_max_s: 'float' = 10.0, reconnect_max_attempts: 'int | None' = None, reprobe_on_reconnect: 'bool' = True, hotplug_poll_s: 'float' = 1.5, probe_pool_size: 'int' = 4, probe_total_timeout_s: 'float' = 30.0) -> None"
       },
@@ -899,8 +1186,9 @@
       ]
     },
     "serialforge.advanced.HandlerStats": {
+      "overloads": {},
       "methods": {
-        "__init__": "(self, srtt_s: 'float | None' = None, rttvar_s: 'float | None' = None, poll_interval_s: 'float | None' = None, rto_s: 'float | None' = None, dropped_events: 'int' = 0, dropped_traffic_lines: 'int' = 0) -> None"
+        "__init__": "(self, srtt_s: 'float | None' = None, rttvar_s: 'float | None' = None, poll_interval_s: 'float | None' = None, rto_s: 'float | None' = None, dropped_events: 'int' = 0, dropped_traffic_lines: 'int' = 0, dropped_background_errors: 'int' = 0) -> None"
       },
       "properties": {},
       "signals": {},
@@ -934,52 +1222,267 @@
           "name": "dropped_traffic_lines",
           "type": "int",
           "kw_only": false
+        },
+        {
+          "name": "dropped_background_errors",
+          "type": "int",
+          "kw_only": false
         }
       ]
     },
+    "serialforge.advanced.CommandCall": {
+      "overloads": {},
+      "methods": {
+        "__init__": "(self, request_id: 'str', spec: 'CommandSpec | None', route: 'SendRoute', *, context: 'Mapping[str, object]', timeout_s: 'float', deadline: 'float', dispatch: 'Callable[[Callable[[], None]], None]', cancel: 'Callable[[CommandTicket, CommandStatus], None]') -> 'None'",
+        "add_done_callback": "(self, callback: 'Callable[[Message[T]], None]', /) -> 'Self'",
+        "result": "(self) -> 'Message[T]'",
+        "cancel": "(self) -> 'None'"
+      },
+      "properties": {
+        "done": "(self) -> 'bool'",
+        "callback_expired": "(self) -> 'bool'",
+        "exception": "(self) -> 'Exception | None'",
+        "callback_exception": "(self) -> 'Exception | None'"
+      },
+      "signals": {},
+      "attributes": {}
+    },
+    "serialforge.advanced.SpecRole": {
+      "members": {
+        "COMMAND": "command",
+        "EVENT": "event"
+      }
+    },
+    "serialforge.advanced.DeviceProfile": {
+      "overloads": {},
+      "methods": {
+        "__init__": "(self, vid_pid: 'Sequence[tuple[int, int]] | None' = None, baudrates: 'Sequence[int]' = (), probe: 'CommandSpec | object' = None, name: 'str | None' = None, terminator: 'str' = '\\r\\n', encoding: 'str' = 'utf-8', echo: 'bool' = False, heartbeat_s: 'float | None' = None, serial: 'SerialConfig | None' = None, framing: 'FramingConfig | None' = None, runtime: 'RuntimeConfig | None' = None) -> None"
+      },
+      "properties": {},
+      "signals": {},
+      "fields": [
+        {
+          "name": "vid_pid",
+          "type": "Sequence[tuple[int, int]] | None",
+          "kw_only": false
+        },
+        {
+          "name": "baudrates",
+          "type": "Sequence[int]",
+          "kw_only": false
+        },
+        {
+          "name": "probe",
+          "type": "CommandSpec | object",
+          "kw_only": false
+        },
+        {
+          "name": "name",
+          "type": "str | None",
+          "kw_only": false
+        },
+        {
+          "name": "terminator",
+          "type": "str",
+          "kw_only": false
+        },
+        {
+          "name": "encoding",
+          "type": "str",
+          "kw_only": false
+        },
+        {
+          "name": "echo",
+          "type": "bool",
+          "kw_only": false
+        },
+        {
+          "name": "heartbeat_s",
+          "type": "float | None",
+          "kw_only": false
+        },
+        {
+          "name": "serial",
+          "type": "SerialConfig | None",
+          "kw_only": false
+        },
+        {
+          "name": "framing",
+          "type": "FramingConfig | None",
+          "kw_only": false
+        },
+        {
+          "name": "runtime",
+          "type": "RuntimeConfig | None",
+          "kw_only": false
+        }
+      ]
+    },
+    "serialforge.advanced.LogConfig": {
+      "overloads": {},
+      "methods": {
+        "__init__": "(self, enabled: 'bool' = False, save_to_file: 'bool' = False, dir: 'Path | None' = None, app_name: 'str | None' = None, max_files: 'int' = 50, max_file_bytes: 'int' = 20971520) -> None"
+      },
+      "properties": {},
+      "signals": {},
+      "fields": [
+        {
+          "name": "enabled",
+          "type": "bool",
+          "kw_only": false
+        },
+        {
+          "name": "save_to_file",
+          "type": "bool",
+          "kw_only": false
+        },
+        {
+          "name": "dir",
+          "type": "Path | None",
+          "kw_only": false
+        },
+        {
+          "name": "app_name",
+          "type": "str | None",
+          "kw_only": false
+        },
+        {
+          "name": "max_files",
+          "type": "int",
+          "kw_only": false
+        },
+        {
+          "name": "max_file_bytes",
+          "type": "int",
+          "kw_only": false
+        }
+      ]
+    },
+    "serialforge.advanced.DeviceFinder": {
+      "overloads": {},
+      "methods": {
+        "__init__": "(self, profile: 'DeviceProfile') -> 'None'",
+        "find": "(self, mode: 'ScanMode' = <ScanMode.ALL: 'all'>, *, port: 'str | None' = None) -> 'list[DeviceInfo]'",
+        "cancel": "(self) -> 'None'",
+        "forget": "(self, device: 'DeviceInfo') -> 'None'",
+        "run_find": "(self, mode: 'ScanMode', port: 'str | None') -> 'list[DeviceInfo]'"
+      },
+      "properties": {},
+      "signals": {
+        "probe_progress": "Signal(str, int)",
+        "probe_finished": "Signal(object)"
+      },
+      "attributes": {}
+    },
     "serialforge.errors.SerialForgeError": {
+      "overloads": {},
       "methods": {},
       "properties": {},
       "signals": {},
       "attributes": {}
     },
     "serialforge.errors.PortBusyError": {
+      "overloads": {},
       "methods": {},
       "properties": {},
       "signals": {},
       "attributes": {}
     },
     "serialforge.errors.PortNotFoundError": {
+      "overloads": {},
       "methods": {},
       "properties": {},
       "signals": {},
       "attributes": {}
     },
     "serialforge.errors.PermissionDeniedError": {
+      "overloads": {},
       "methods": {},
       "properties": {},
       "signals": {},
       "attributes": {}
     },
     "serialforge.errors.ProbeError": {
+      "overloads": {},
       "methods": {},
       "properties": {},
       "signals": {},
       "attributes": {}
     },
     "serialforge.errors.FramingError": {
+      "overloads": {},
       "methods": {},
       "properties": {},
       "signals": {},
       "attributes": {}
     },
     "serialforge.errors.CommandError": {
+      "overloads": {},
       "methods": {},
       "properties": {},
       "signals": {},
       "attributes": {}
     },
     "serialforge.errors.ConfigError": {
+      "overloads": {},
+      "methods": {},
+      "properties": {},
+      "signals": {},
+      "attributes": {}
+    },
+    "serialforge.errors.CommandExecutionError": {
+      "overloads": {},
+      "methods": {
+        "__init__": "(self, message: 'Message[Any]', cause: 'Exception | None' = None) -> 'None'"
+      },
+      "properties": {},
+      "signals": {},
+      "attributes": {}
+    },
+    "serialforge.errors.CommandTimeoutError": {
+      "overloads": {},
+      "methods": {},
+      "properties": {},
+      "signals": {},
+      "attributes": {}
+    },
+    "serialforge.errors.CommandCancelledError": {
+      "overloads": {},
+      "methods": {},
+      "properties": {},
+      "signals": {},
+      "attributes": {}
+    },
+    "serialforge.errors.CommandBusyError": {
+      "overloads": {},
+      "methods": {},
+      "properties": {},
+      "signals": {},
+      "attributes": {}
+    },
+    "serialforge.errors.CommandDisconnectedError": {
+      "overloads": {},
+      "methods": {},
+      "properties": {},
+      "signals": {},
+      "attributes": {}
+    },
+    "serialforge.errors.CommandParseError": {
+      "overloads": {},
+      "methods": {},
+      "properties": {},
+      "signals": {},
+      "attributes": {}
+    },
+    "serialforge.errors.DeviceCommandError": {
+      "overloads": {},
+      "methods": {},
+      "properties": {},
+      "signals": {},
+      "attributes": {}
+    },
+    "serialforge.errors.CommandNotReadyError": {
+      "overloads": {},
       "methods": {},
       "properties": {},
       "signals": {},

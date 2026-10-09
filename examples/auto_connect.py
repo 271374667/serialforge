@@ -7,7 +7,7 @@
 
 1. ``DeviceProfile`` 上每个参数分别管什么（VID/PID、候选波特率、探测命令、超时）
 2. VID/PID 可以省略：省略时不筛 USB 身份，全部串口都会被探测，靠回复确认设备
-3. ``DeviceFinder.find()`` 的 ``ALL`` 与 ``FIRST_MATCH`` 两种完成策略
+3. ``SerialForge.scan()`` 的 ``ALL`` 与 ``FIRST_MATCH`` 两种完成策略
 4. ``handler.connect()`` 的三种入口：无参全自动 / 只给端口名 /
    给已探测的 ``DeviceInfo``
 
@@ -21,24 +21,24 @@ import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from PySide6.QtCore import QCoreApplication
-
 from examples.virtual_device import HELLO, VERSION, VirtualDevice
 from serialforge import (
-    CommandResult,
     CommandSpec,
-    DeviceFinder,
     DeviceInfo,
     DeviceProfile,
+    Message,
+    MessageCategory,
     ScanMode,
+    SerialForge,
     SerialForgeError,
-    SerialHandler,
 )
 from serialforge.advanced import RuntimeConfig, SerialConfig
+from serialforge.qt_core import QCoreApplication
 
 
 class AutoConnectDemo:
@@ -51,12 +51,19 @@ class AutoConnectDemo:
         # 一台 VID/PID 不匹配、也从不回应的干扰设备：用来看过滤和探测的效果。
         self._decoy = VirtualDevice.other_adapter()
         self._profile = self._build_profile(self._device.vid_pid)
-        self._handler = SerialHandler(self._profile)
+        self._handler = SerialForge(self._profile)
         # 只注册本示例要用的两条命令；声明来自虚拟设备的指令集。
-        self._handler.register(VERSION, HELLO)
-        self._results: list[CommandResult] = []
+        self._handler.add(VERSION)
+        self._handler.add(HELLO)
+        self._results: list[Message[Any]] = []
         self._attempts: list[str] = []
-        self._handler.command_finished.connect(self._results.append)
+        self._handler.received.connect(
+            lambda message: (
+                self._results.append(message)
+                if message.category is MessageCategory.COMMAND_RESULT
+                else None
+            )
+        )
 
     def _build_profile(
         self, vid_pid: tuple[tuple[int, int], ...] | None
@@ -115,14 +122,8 @@ class AutoConnectDemo:
         """跑一次阻塞扫描并打印探测过程与结果。"""
         print(f"\n=== 阻塞扫描：{title} ===")
         self._attempts.clear()
-        finder = DeviceFinder(profile)
-        # probe_progress 是跨线程信号：探测在工作线程里跑，信号会排到主线程，
-        # 所以 find() 阻塞期间收不到；扫描结束后泵一下事件再统一打印。
-        finder.probe_progress.connect(self._on_probe_progress)
-        found = finder.find(mode)
-        self._pump(0.2)
-        for attempt in self._attempts:
-            print(f"  探测过 {attempt}")
+        found = self._handler.scan(profile, mode=mode)
+        self._handler.configure(self._profile)
         print(f"  找到 {[item.port for item in found]}")
         return found
 
@@ -136,9 +137,9 @@ class AutoConnectDemo:
         print(f"\n=== 连接入口：{self._describe(target)} ===")
         try:
             # 阻塞式连接：返回时设备已打开并初始化完成，可以立刻 send()。
-            self._handler.connect(target)
+            self._handler.connect(target or "")
             print(f"  已连接，状态={self._handler.state.value}")
-            self._handler.send(HELLO)
+            self._handler.send_async(HELLO)
             result = self._wait_result(HELLO)
             print(f"  收到: {result.data}  原始帧: {result.raw_frames[0]!r}")
         except SerialForgeError as error:
@@ -156,7 +157,7 @@ class AutoConnectDemo:
             return f"DeviceInfo({target.port}@{target.baudrate})，跳过重新探测"
         return f"端口名 {target}，绕过 VID/PID 过滤"
 
-    def _wait_result(self, spec: CommandSpec) -> CommandResult:
+    def _wait_result(self, spec: CommandSpec) -> Message[Any]:
         """等到某个声明的终态结果（结果由 I/O 线程发出，需要泵事件）。"""
         self._wait_until(
             lambda: any(item.spec is spec for item in self._results)

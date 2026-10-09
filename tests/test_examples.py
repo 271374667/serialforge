@@ -13,7 +13,8 @@ import pytest
 
 import examples.virtual_device as virtual_device
 from examples.virtual_device import VirtualDevice
-from serialforge import CommandSpec, advanced
+from serialforge import advanced
+from serialforge.enums import SpecRole
 
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES = ROOT / "examples"
@@ -94,7 +95,7 @@ def test_virtual_device_documents_its_declarations() -> None:
     """Fail when a new command is declared without documenting it."""
     table = virtual_device.__doc__ or ""
     for declaration in VirtualDevice().declarations():
-        if isinstance(declaration, CommandSpec):
+        if declaration.role is SpecRole.COMMAND:
             text = declaration.request
         else:
             # 事件没有请求文本，用 pattern 的首词（例如 ALARM）来核对。

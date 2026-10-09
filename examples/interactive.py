@@ -27,27 +27,28 @@ from __future__ import annotations
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
-from PySide6.QtCore import QCoreApplication
 
 from examples.virtual_device import (
     ALARM,
     MONITOR,
     STOP,
     VERSION,
+    Alarm,
     VirtualDevice,
 )
 from serialforge import (
-    CommandResult,
-    DeviceEvent,
     DeviceProfile,
+    Message,
+    MessageCategory,
+    SerialForge,
     SerialForgeError,
-    SerialHandler,
 )
 from serialforge.advanced import CommandPriority, CommandTicket, SerialConfig
+from serialforge.qt_core import QCoreApplication
 
 
 class InteractiveConsole:
@@ -71,13 +72,31 @@ class InteractiveConsole:
         """准备 Qt 应用、虚拟设备、handler 与信号槽。"""
         self._application = QCoreApplication.instance() or QCoreApplication([])
         self._device = VirtualDevice()
-        self._handler = SerialHandler(self._build_profile())
+        self._handler = SerialForge(self._build_profile())
         # 正在跑的流式命令：需要留着 ticket 才能在 stop 时取消它。
         self._monitor_ticket: CommandTicket | None = None
-        self._handler.register(*self._device.declarations())
+        for declaration in self._device.declarations():
+            self._handler.add(declaration)
         # 接收全部放在槽里：结果、事件（含未识别帧）都从信号来。
-        self._handler.command_finished.connect(self._on_result)
-        self._handler.event_received.connect(self._on_event)
+        self._handler.received.connect(
+            lambda message: (
+                self._on_result(message)
+                if message.category is MessageCategory.COMMAND_RESULT
+                else None
+            )
+        )
+        self._handler.received.connect(
+            lambda message: (
+                self._on_event(message)
+                if message.category
+                in (
+                    MessageCategory.DEVICE_EVENT,
+                    MessageCategory.STREAM_FRAME,
+                    MessageCategory.UNKNOWN_FRAME,
+                )
+                else None
+            )
+        )
 
     def _build_profile(self) -> DeviceProfile:
         """设备描述：身份与波特率来自虚拟设备，probe 是版本查询。"""
@@ -130,7 +149,7 @@ class InteractiveConsole:
             print(self.HELP)
         elif text == "monitor":
             # 流式命令不会自己结束，需要 stop 或 cancel 才能收尾。
-            self._monitor_ticket = self._handler.send(MONITOR)
+            self._monitor_ticket = self._handler.send_async(MONITOR)
             print("  已开始流式输出，输入 stop 结束")
         elif text == "stop":
             self._stop_monitor()
@@ -140,11 +159,11 @@ class InteractiveConsole:
         elif text.startswith("raw "):
             raw_text = text[4:]
             print(f"  发送原始文本: {raw_text!r}")
-            self._handler.send(raw_text)
+            self._handler.send_async(raw_text)
         else:
             # 已注册命令的名字（或任意文本）都交给 send()：库先按声明匹配，
             # 匹配不到时按原始文本发送（route=RAW）。
-            self._handler.send(text)
+            self._handler.send_async(text)
 
     def _stop_monitor(self) -> None:
         """停止流式输出：先抢发停止命令，再取消流式 ticket。"""
@@ -152,22 +171,23 @@ class InteractiveConsole:
             print("  当前没有在跑的流式命令")
             return
         # URGENT 优先级让停止命令插到队列前面，不用等普通命令发完。
-        self._handler.send(STOP, priority=CommandPriority.URGENT)
+        self._handler.send_async(STOP, priority=CommandPriority.URGENT)
         # cancel() 只影响本地队列：已经写出去的帧照旧会到达。
         self._monitor_ticket.cancel()
         self._monitor_ticket = None
         print("  已请求停止流式输出")
 
-    def _on_result(self, result: CommandResult) -> None:
+    def _on_result(self, result: Message[Any]) -> None:
         """命令终态槽：status 说明成败，data 是解析结果。"""
         name = "原始文本" if result.spec is None else result.spec.name
         print(f"  [结果] {name} 状态={result.status.value} 数据={result.data}")
 
-    def _on_event(self, event: DeviceEvent) -> None:
+    def _on_event(self, event: Message[Any]) -> None:
         """事件槽：流式帧、主动上报、以及没匹配上的回包都在这里。"""
         if event.spec is MONITOR:
             print(f"  [流] {event.data}")
         elif event.spec is ALARM:
+            assert isinstance(event.data, Alarm)
             print(f"  [上报] 报警 {event.data.code}")
         else:
             print(f"  [未识别帧] {event.raw_frame!r}")

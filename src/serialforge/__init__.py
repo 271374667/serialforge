@@ -18,15 +18,18 @@ except PackageNotFoundError:
     __version__ = "0.0.1"
 
 from serialforge.connection import SerialHandler
+from serialforge.connection.serial_forge import SerialForge
 from serialforge.discovery import DeviceFinder
 from serialforge.enums import (
     CommandStatus,
     ConnectionState,
     Correlation,
+    MessageCategory,
     ResponseMode,
     ScanMode,
 )
 from serialforge.errors import SerialForgeError
+from serialforge.message import Message
 from serialforge.models import (
     CommandResult,
     CommandSpec,
@@ -36,8 +39,13 @@ from serialforge.models import (
     EventSpec,
     LogConfig,
 )
+from serialforge.spec import Spec
 
 __all__ = [
+    "SerialForge",
+    "Spec",
+    "Message",
+    "MessageCategory",
     "SerialHandler",
     "DeviceFinder",
     "DeviceProfile",

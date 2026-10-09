@@ -7,13 +7,16 @@ import string
 import threading
 from collections.abc import Mapping
 from types import MappingProxyType
+from typing import Any
 
+from serialforge.enums import SpecRole
 from serialforge.errors import CommandError
 from serialforge.models import CommandSpec, EventSpec
+from serialforge.spec import Spec
 
 RegistrySnapshot = tuple[
     tuple[CommandSpec, ...],
-    tuple[EventSpec, ...],
+    tuple[EventSpec | Spec[Any], ...],
     Mapping[str, CommandSpec],
     tuple[tuple[CommandSpec, re.Pattern[str], int], ...],
 ]
@@ -38,13 +41,15 @@ class CommandRegistry:
         return self._snapshot[0]
 
     @property
-    def events(self) -> tuple[EventSpec, ...]:
+    def events(self) -> tuple[EventSpec | Spec[Any], ...]:
         """Return the current immutable event snapshot."""
         return self._snapshot[1]
 
     def contains(self, spec: CommandSpec | EventSpec) -> bool:
         """Check registration by object identity."""
-        if isinstance(spec, CommandSpec):
+        if isinstance(spec, CommandSpec) and not (
+            isinstance(spec, Spec) and spec.role is SpecRole.EVENT
+        ):
             return spec in self._snapshot[0]
         return spec in self._snapshot[1]
 
@@ -61,10 +66,14 @@ class CommandRegistry:
             commands = list(self._snapshot[0])
             events = list(self._snapshot[1])
             for spec in specs:
-                if isinstance(spec, CommandSpec):
+                if isinstance(spec, CommandSpec) and not (
+                    isinstance(spec, Spec) and spec.role is SpecRole.EVENT
+                ):
                     if spec not in commands:
                         commands.append(spec)
-                elif isinstance(spec, EventSpec):
+                elif isinstance(spec, EventSpec) or (
+                    isinstance(spec, Spec) and spec.role is SpecRole.EVENT
+                ):
                     if spec not in events:
                         events.append(spec)
                 else:
@@ -83,7 +92,7 @@ class CommandRegistry:
             self._publish(commands, events)
 
     def _publish(
-        self, commands: list[CommandSpec], events: list[EventSpec]
+        self, commands: list[CommandSpec], events: list[EventSpec | Spec[Any]]
     ) -> None:
         """Validate candidates before replacing the one shared snapshot."""
         exact: dict[str, CommandSpec] = {}

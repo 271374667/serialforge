@@ -10,7 +10,6 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import QCoreApplication, Qt
 
 from serialforge import (
     CommandResult,
@@ -20,11 +19,12 @@ from serialforge import (
     DeviceInfo,
     DeviceProfile,
     LogConfig,
-    SerialHandler,
 )
 from serialforge.advanced import FramingConfig, RuntimeConfig, SerialConfig
+from serialforge.connection.handler_core import HandlerCore as SerialHandler
 from serialforge.enums import FramingMode
 from serialforge.errors import PortNotFoundError, SerialForgeError
+from serialforge.qt_core import QCoreApplication, Qt
 from serialforge.transport import PortRegistry
 from tests.support import FakeBackend, SimulatedDevice, use_fake_backend
 from tests.support.recording_backend import RecordingBackend

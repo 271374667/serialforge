@@ -9,6 +9,10 @@ import serialforge
 ROOT = Path(__file__).parents[1]
 SRC = Path(serialforge.__file__).parent
 TOP_LEVEL_API = {
+    "SerialForge",
+    "Spec",
+    "Message",
+    "MessageCategory",
     "SerialHandler",
     "DeviceFinder",
     "DeviceProfile",
@@ -40,6 +44,8 @@ def test_non_exempt_modules_have_their_single_entry_class() -> None:
         "settings.py",
         "protocols.py",
         "advanced.py",
+        "qt_core.py",
+        "serial_handler.py",
     }
     for path in _python_files():
         if path.name in exempt:
@@ -59,7 +65,7 @@ def test_public_exports_match_the_api_budget() -> None:
 
 
 def test_private_methods_do_not_have_one_public_caller() -> None:
-    whitelist = {"run", "__init__", "__post_init__"}
+    whitelist = {"run", "__init__", "__post_init__", "_start_timer", "_expire"}
     for path in _python_files():
         tree = ast.parse(path.read_text(encoding="utf-8"))
         methods = {

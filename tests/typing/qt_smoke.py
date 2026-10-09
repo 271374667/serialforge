@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QThread, Signal, Slot
 from typing_extensions import override
 
 from serialforge import CommandResult, CommandSpec
+from serialforge.qt_core import QThread, Signal, Slot
 
 
 class SmokeThread(QThread):

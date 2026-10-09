@@ -7,9 +7,13 @@ the implementation subpackages.
 
 from __future__ import annotations
 
+# Lazy advanced re-exports avoid definition/implementation cycles.
+# pylint: disable=import-outside-toplevel
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
+from typing import TYPE_CHECKING, Any
 
 from serialforge.enums import (
     Checksum,
@@ -23,6 +27,12 @@ from serialforge.enums import (
     TimeoutPolicy,
 )
 from serialforge.errors import ConfigError
+
+if TYPE_CHECKING:
+    from serialforge.connection.command_call import CommandCall
+    from serialforge.discovery.device_finder import DeviceFinder
+    from serialforge.enums import SpecRole
+    from serialforge.models import DeviceProfile, LogConfig
 
 
 # Public schemas intentionally expose all transport knobs in one frozen object.
@@ -289,6 +299,7 @@ class HandlerStats:
     rto_s: float | None = None
     dropped_events: int = 0
     dropped_traffic_lines: int = 0
+    dropped_background_errors: int = 0
 
 
 @dataclass(frozen=True)
@@ -318,6 +329,8 @@ class CommandTicket:
     request_id: str
     spec: object | None
     route: SendRoute
+    context: Mapping[str, object]
+    deadline: float
     _cancelled: bool
 
     def __init__(
@@ -337,10 +350,15 @@ class CommandTicket:
         self.spec = spec
         self.route = route
         self._cancelled = False
+        self.deadline = float("inf")
+        self.context = MappingProxyType({})
 
     def cancel(self) -> None:
         """Request local cancellation of the command."""
         self._cancelled = True
+
+    def _complete(self, result: object) -> None:
+        """Allow invocation handles to retain completion before notification."""
 
     @property
     def cancelled(self) -> bool:
@@ -366,4 +384,34 @@ __all__ = [
     "ReadLoopConfig",
     "RuntimeConfig",
     "HandlerStats",
+]
+
+
+def __getattr__(name: str) -> Any:
+    """Resolve advanced facade types lazily to avoid implementation cycles."""
+    if name == "CommandCall":
+        from serialforge.connection.command_call import CommandCall
+
+        return CommandCall
+    if name == "SpecRole":
+        from serialforge.enums import SpecRole
+
+        return SpecRole
+    if name in ("DeviceProfile", "LogConfig"):
+        from serialforge.models import DeviceProfile, LogConfig
+
+        return {"DeviceProfile": DeviceProfile, "LogConfig": LogConfig}[name]
+    if name == "DeviceFinder":
+        from serialforge.discovery.device_finder import DeviceFinder
+
+        return DeviceFinder
+    raise AttributeError(name)
+
+
+__all__ += [
+    "CommandCall",
+    "SpecRole",
+    "DeviceProfile",
+    "LogConfig",
+    "DeviceFinder",
 ]

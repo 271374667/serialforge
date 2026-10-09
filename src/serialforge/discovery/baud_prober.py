@@ -13,7 +13,7 @@ from loguru import logger
 from serialforge.advanced import FramingConfig, ProbeSpec, SerialConfig
 from serialforge.discovery.baud_cache import BaudCache
 from serialforge.enums import FramingMode
-from serialforge.errors import FramingError, PortBusyError
+from serialforge.errors import FramingError, PortBusyError, ProbeError
 from serialforge.models import CommandSpec, DeviceInfo, DeviceProfile
 from serialforge.protocols import PortBackend, TransportProtocol
 from serialforge.settings import LOG_ENABLED
@@ -26,13 +26,25 @@ from serialforge.transport import FrameSplitter, PortOptions, PortRegistry
 class BaudProber:
     """Try allowed baudrates serially on one port and validate its reply."""
 
+    # Probe observers and strict failure policy are injected by the facade.
+    # pylint: disable=too-many-arguments
     def __init__(
-        self, profile: DeviceProfile, backend: PortBackend, cache: BaudCache
+        self,
+        profile: DeviceProfile,
+        backend: PortBackend,
+        cache: BaudCache,
+        *,
+        raw_received: Callable[[bytes], None] | None = None,
+        raw_sent: Callable[[bytes], None] | None = None,
+        strict_errors: bool = False,
     ) -> None:
         """Retain the profile, backend, and per-device baud hint cache."""
         self._profile: DeviceProfile = profile
         self._backend: PortBackend = backend
         self._cache: BaudCache = cache
+        self._raw_received = raw_received
+        self._raw_sent = raw_sent
+        self._strict_errors = strict_errors
 
     def probe(
         self,
@@ -62,6 +74,10 @@ class BaudProber:
                         baudrate,
                         exc,
                     )
+                if self._strict_errors:
+                    raise ProbeError(
+                        f"probe failed on {device.port} at {baudrate}: {exc}"
+                    ) from exc
                 if isinstance(exc, PortBusyError):
                     return None
                 continue
@@ -113,7 +129,10 @@ class BaudProber:
                 request = (
                     probe.request.rstrip("\r\n") + self._profile.terminator
                 ).encode(self._profile.encoding)
-                if transport.write(request) != len(request):
+                written = transport.write(request)
+                if written > 0 and self._raw_sent is not None:
+                    self._raw_sent(request[:written])
+                if written != len(request):
                     return None
                 timeout = probe.timeout_s
                 seconds = (
@@ -150,6 +169,8 @@ class BaudProber:
             if remaining <= 0:
                 return None
             chunk = transport.read(1, min(0.02, remaining))
+            if chunk and self._raw_received is not None:
+                self._raw_received(chunk)
             if cancel.is_set():
                 return None
             frames: list[bytes] = []
@@ -159,6 +180,8 @@ class BaudProber:
                     extra = transport.read(4096, 0.0)
                     if not extra:
                         break
+                    if self._raw_received is not None:
+                        self._raw_received(extra)
                     parts.append(extra)
                 frames.extend(splitter.feed(b"".join(parts)))
             frames.extend(splitter.flush())

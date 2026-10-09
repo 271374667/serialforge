@@ -10,10 +10,10 @@ from uuid import uuid4
 
 from loguru import logger
 
-# pylint: disable=no-name-in-module
-from PySide6.QtCore import QStandardPaths
-
 from serialforge.models import DeviceInfo
+
+# pylint: disable=no-name-in-module
+from serialforge.qt_core import QStandardPaths
 from serialforge.settings import LOG_ENABLED
 
 

@@ -21,9 +21,9 @@
 
 要点：
 
-- 表里的 ``CommandSpec`` / ``EventSpec`` 就是使用方为自己的设备写的声明，
+- 表里的 统一的 ``Spec`` 就是使用方为自己的设备写的声明，
   这里集中放一份，示例里就只剩 serialforge 的调用。
-- ``Ping`` 故意不注册：它的回包会作为“未识别帧”从 ``event_received`` 出来。
+- ``Ping`` 故意不注册：它的回包会作为“未识别帧”从 ``received`` 出来。
 - ``ALARM`` 是设备主动发的；真机由设备自己推，这里用 ``inject_alarm()`` 注入。
 
 用法::
@@ -41,12 +41,12 @@ from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from serialforge import CommandSpec, EventSpec, ResponseMode
+from serialforge import ResponseMode, Spec
 from tests.support import FakeBackend, SimulatedDevice, use_fake_backend
 
 # 设备的 USB 身份与工作波特率：示例用它们拼 DeviceProfile。
@@ -76,7 +76,7 @@ class Alarm:
 
 
 # 指令集：请求文本、应答正则和结果类型都在这里声明一次。
-VERSION = CommandSpec(
+VERSION = Spec(
     "Version",
     r"Software version (?P<version>\d+\.\d+)",
     VersionInfo,
@@ -84,21 +84,23 @@ VERSION = CommandSpec(
     # 否则扫描会把时间都花在等失败的波特率上。
     timeout_s=0.3,
 )
-READ_ALL = CommandSpec(
+READ_ALL = Spec(
     "ReadAll",
     r"VALUE (?P<value>\d+)",
     mode=ResponseMode.MULTI,
     count=3,
+    result_type=dict,
 )
-MONITOR = CommandSpec(
+MONITOR = Spec(
     "Monitor",
     r"ADC (?P<value>\d+)",
+    result_type=dict,
     mode=ResponseMode.STREAM,
 )
-STOP = CommandSpec("Stop")
-REBOOT = CommandSpec("Reboot")
-HELLO = CommandSpec("Hello", r"HELLO (?P<name>\w+)")
-ALARM = EventSpec(r"ALARM (?P<code>\d+)", Alarm)
+STOP = Spec("Stop", mode=ResponseMode.NO_REPLY)
+REBOOT = Spec("Reboot", mode=ResponseMode.NO_REPLY)
+HELLO = Spec("Hello", r"HELLO (?P<name>\w+)", dict)
+ALARM = Spec(pattern=r"ALARM (?P<code>\d+)", result_type=Alarm)
 
 
 class VirtualDevice:
@@ -157,13 +159,13 @@ class VirtualDevice:
         """让设备主动上报一帧报警。
 
         真机上这帧由设备自己发；与请求无关的帧就是“主动上报”，会走
-        ``event_received``。这里借内存后端的注入接口手工制造一帧。
+        ``received``。这里借内存后端的注入接口手工制造一帧。
         """
         if self._backend is None or not self._backend.transports:
             raise RuntimeError("请先进入 device.use() 并完成连接，再注入上报")
         self._backend.transports[-1].inject(f"ALARM {code}\r\n".encode())
 
-    def declarations(self) -> tuple[CommandSpec | EventSpec, ...]:
+    def declarations(self) -> tuple[Spec[Any], ...]:
         """本设备的全部声明，便于一次性 ``handler.register(*...)``。"""
         return (VERSION, READ_ALL, MONITOR, STOP, REBOOT, HELLO, ALARM)
 

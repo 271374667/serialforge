@@ -9,8 +9,8 @@ Stop / Reboot / Ping / ALARM）见 ``examples/virtual_device.py``；真机上换
 
 1. 单发单收（SINGLE）：一条请求 → 一条回复
 2. 单发多收（MULTI）：一条请求 → 多条回复（用 ``count`` 或 ``until`` 结束）
-3. 流式输出（STREAM）：设备持续吐帧，逐帧从 ``event_received`` 出来
-4. 主动上报（EventSpec）：设备没被问也会推数据
+3. 流式输出（STREAM）：设备持续吐帧，逐帧从 ``received`` 出来
+4. 主动上报（Spec）：设备没被问也会推数据
 5. 无回复（NO_REPLY）：写完就结束，不等回复
 
 ``connect()`` 是阻塞的：返回时设备已经就绪，可以直接 ``send()``。示例里手动泵
@@ -26,12 +26,11 @@ import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 # 允许直接 ``python examples/quick_start.py`` 运行（不经过包导入）时找到项目根。
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
-from PySide6.QtCore import QCoreApplication
 
 from examples.virtual_device import (
     ALARM,
@@ -43,14 +42,15 @@ from examples.virtual_device import (
     VirtualDevice,
 )
 from serialforge import (
-    CommandResult,
     CommandSpec,
-    DeviceEvent,
     DeviceProfile,
+    Message,
+    MessageCategory,
+    SerialForge,
     SerialForgeError,
-    SerialHandler,
 )
 from serialforge.advanced import CommandPriority, SerialConfig
+from serialforge.qt_core import QCoreApplication
 
 
 class QuickStartDemo:
@@ -58,18 +58,36 @@ class QuickStartDemo:
 
     def __init__(self) -> None:
         """准备 Qt 应用、虚拟设备、handler 与信号收集容器。"""
-        # SerialHandler 构造时就会检查 Qt 应用是否存在，所以先建它。
+        # SerialForge 构造时就会检查 Qt 应用是否存在，所以先建它。
         self._application = QCoreApplication.instance() or QCoreApplication([])
         # 虚拟设备的指令集见 examples/virtual_device.py 顶部的表格。
         self._device = VirtualDevice()
-        self._handler = SerialHandler(self._build_profile())
-        self._results: list[CommandResult] = []
-        self._events: list[DeviceEvent] = []
+        self._handler = SerialForge(self._build_profile())
+        self._results: list[Message[Any]] = []
+        self._events: list[Message[Any]] = []
         # 命令必须先注册再发送，而且要用同一份声明对象（库不复制声明）。
-        self._handler.register(*self._device.declarations())
+        for declaration in self._device.declarations():
+            self._handler.add(declaration)
         # 结果和事件都只从信号回来，这里先收进列表，方便下面顺序演示。
-        self._handler.command_finished.connect(self._results.append)
-        self._handler.event_received.connect(self._events.append)
+        self._handler.received.connect(
+            lambda message: (
+                self._results.append(message)
+                if message.category is MessageCategory.COMMAND_RESULT
+                else None
+            )
+        )
+        self._handler.received.connect(
+            lambda message: (
+                self._events.append(message)
+                if message.category
+                in (
+                    MessageCategory.DEVICE_EVENT,
+                    MessageCategory.STREAM_FRAME,
+                    MessageCategory.UNKNOWN_FRAME,
+                )
+                else None
+            )
+        )
 
     def _build_profile(self) -> DeviceProfile:
         """设备描述：身份与波特率取自虚拟设备，probe 决定“怎么确认是它”。"""
@@ -108,7 +126,7 @@ class QuickStartDemo:
         """1. 单发单收：一条请求对应一条回复。"""
         print("\n=== 1. 单发单收（SINGLE）===")
         self._results.clear()
-        self._handler.send(VERSION)
+        self._handler.send_async(VERSION)
         result = self._wait_result(VERSION)
         print(f"  请求文本: {VERSION.request!r}")
         print(f"  解析结果: {result.data}  原始帧: {result.raw_frames[0]!r}")
@@ -117,21 +135,22 @@ class QuickStartDemo:
         """2. 单发多收：MULTI 把多帧收进一个结果里。"""
         print("\n=== 2. 单发多收（MULTI，count=3）===")
         self._results.clear()
-        self._handler.send(READ_ALL)
+        self._handler.send_async(READ_ALL)
         result = self._wait_result(READ_ALL)
         # 没指定 result_type 时，每帧解析成一个 dict，整体是 list。
+        assert isinstance(result.data, list)
         for index, frame in enumerate(result.data, start=1):
             print(f"  第 {index} 帧: {frame}")
         print(f"  帧数: {len(result.raw_frames)}")
 
     def _demo_stream(self) -> None:
-        """3. 流式输出：STREAM 的帧只走 event_received。"""
+        """3. 流式输出：STREAM 的帧只走 received。"""
         print("\n=== 3. 流式输出（STREAM）===")
         self._events.clear()
-        ticket = self._handler.send(MONITOR)
+        ticket = self._handler.send_async(MONITOR)
         self._wait_until(lambda: len(self._frames_of(MONITOR)) >= 3)
         # 停止命令要插到普通命令前面，所以用 URGENT 优先级。
-        self._handler.send(STOP, priority=CommandPriority.URGENT)
+        self._handler.send_async(STOP, priority=CommandPriority.URGENT)
         self._wait_result(STOP)
         # cancel() 让流式命令自身也有明确的终态（CANCELLED），否则它会一直挂着。
         ticket.cancel()
@@ -142,29 +161,29 @@ class QuickStartDemo:
 
     def _demo_event(self) -> None:
         """4. 主动上报：设备没被问也会推数据。"""
-        print("\n=== 4. 主动上报（EventSpec）===")
+        print("\n=== 4. 主动上报（Spec）===")
         self._events.clear()
         # 真机由设备自己推；这里让虚拟设备注入一帧 ALARM 42。
         self._device.inject_alarm()
         self._wait_until(lambda: bool(self._frames_of(ALARM)))
         event = self._frames_of(ALARM)[0]
         print(f"  事件: {event.data}  原始帧: {event.raw_frame!r}")
-        print("  提示：没注册的帧也会进 event_received，此时 spec 为 None")
+        print("  提示：没注册的帧也会进 received，此时 spec 为 None")
 
     def _demo_no_reply(self) -> None:
         """5. 无回复：写完立即结束，不等设备回答。"""
         print("\n=== 5. 无回复（NO_REPLY）===")
         self._results.clear()
-        self._handler.send(REBOOT)
+        self._handler.send_async(REBOOT)
         result = self._wait_result(REBOOT)
         print(f"  终态: {result.status.value}  数据: {result.data}")
         print(f"  已写出字节: {result.sent!r}")
 
-    def _frames_of(self, spec: object) -> list[DeviceEvent]:
+    def _frames_of(self, spec: object) -> list[Message[Any]]:
         """按对象身份筛事件：库不复制声明，所以 ``is`` 才可靠。"""
         return [event for event in self._events if event.spec is spec]
 
-    def _wait_result(self, spec: CommandSpec) -> CommandResult:
+    def _wait_result(self, spec: CommandSpec) -> Message[Any]:
         """等到某个声明的终态结果并返回它。"""
         self._wait_until(
             lambda: any(item.spec is spec for item in self._results)

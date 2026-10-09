@@ -9,6 +9,7 @@ from typing import Any, get_type_hints
 
 from serialforge.errors import CommandError
 from serialforge.models import CommandSpec, EventSpec
+from serialforge.spec import Spec
 
 
 # Parsing branches correspond to the public result data-shape table.
@@ -33,7 +34,7 @@ class ResponseParser:
             CommandError: If a matched frame cannot be converted.
         """
         if spec.pattern is None:
-            if spec.parser is not None:
+            if callable(spec.parser):
                 try:
                     return True, spec.parser(text)
                 except (ValueError, TypeError) as exc:
@@ -44,13 +45,24 @@ class ResponseParser:
         match = re.fullmatch(spec.pattern, text)
         if match is None:
             return False, None
-        if isinstance(spec, CommandSpec) and spec.parser is not None:
+        if isinstance(spec, CommandSpec) and callable(spec.parser):
             try:
-                return True, spec.parser(text)
+                value = spec.parser(text)
+                if isinstance(spec, Spec) and not isinstance(
+                    value, spec.result_type
+                ):
+                    raise CommandError(
+                        "parser return does not match result_type"
+                    )
+                return True, value
             except (ValueError, TypeError) as exc:
                 raise CommandError(f"response parser failed: {exc}") from exc
         result_type = spec.result_type
         captures = match.groupdict()
+        if result_type is dict:
+            return True, captures
+        if isinstance(spec, Spec) and result_type is str:
+            return True, match.group(0)
         if result_type is None:
             return True, captures if captures else match.group(0)
         if result_type in {str, int, float}:

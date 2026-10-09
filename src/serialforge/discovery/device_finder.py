@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
+from collections.abc import Callable
 from concurrent.futures import (
     ThreadPoolExecutor,
     as_completed,
@@ -14,9 +15,6 @@ from concurrent.futures import (
 
 from loguru import logger
 
-# pylint: disable=no-name-in-module
-from PySide6.QtCore import QCoreApplication, QObject, Signal
-
 from serialforge.advanced import RuntimeConfig
 from serialforge.discovery.baud_cache import BaudCache
 from serialforge.discovery.baud_prober import BaudProber
@@ -25,6 +23,9 @@ from serialforge.enums import ScanMode
 from serialforge.errors import ProbeError, SerialForgeError
 from serialforge.models import DeviceInfo, DeviceProfile
 from serialforge.protocols import PortBackend
+
+# pylint: disable=no-name-in-module
+from serialforge.qt_core import QCoreApplication, QObject, Signal
 from serialforge.settings import LOG_ENABLED
 from serialforge.transport import BackendSwitch, SerialTransport
 
@@ -74,6 +75,10 @@ class DeviceFinder(QObject):
         self._cancel: threading.Event = threading.Event()
         self._lock: threading.RLock = threading.RLock()
         self._active: bool = False
+        self._strict_errors: bool = False
+        self._preserve_cancel: bool = False
+        self._raw_received: Callable[[bytes], None] | None = None
+        self._raw_sent: Callable[[bytes], None] | None = None
 
     def find(
         self, mode: ScanMode = ScanMode.ALL, *, port: str | None = None
@@ -100,7 +105,8 @@ class DeviceFinder(QObject):
             if self._active:
                 raise ProbeError("a device scan is already active")
             self._active = True
-            self._cancel.clear()
+            if not self._preserve_cancel:
+                self._cancel.clear()
         return self.run_find(mode, port)
 
     def cancel(self) -> None:
@@ -132,6 +138,7 @@ class DeviceFinder(QObject):
         except (OSError, RuntimeError) as exc:
             if LOG_ENABLED:
                 logger.debug("device scan failed: {}", exc)
+            raise ProbeError(f"device scan failed: {exc}") from exc
         finally:
             with self._lock:
                 self._active = False
@@ -144,7 +151,14 @@ class DeviceFinder(QObject):
         assert isinstance(runtime, RuntimeConfig)
         deadline = time.monotonic() + runtime.probe_total_timeout_s
         candidates = PortScanner(self._profile, self._backend).scan(port)
-        prober = BaudProber(self._profile, self._backend, self._cache)
+        prober = BaudProber(
+            self._profile,
+            self._backend,
+            self._cache,
+            raw_received=self._raw_received,
+            raw_sent=self._raw_sent,
+            strict_errors=self._strict_errors,
+        )
         results: list[DeviceInfo] = []
         with ThreadPoolExecutor(max_workers=runtime.probe_pool_size) as pool:
             futures = [
@@ -166,7 +180,9 @@ class DeviceFinder(QObject):
                     except (OSError, RuntimeError) as exc:
                         if LOG_ENABLED:
                             logger.debug("device probe worker failed: {}", exc)
-                        continue
+                        raise ProbeError(
+                            f"device probe worker failed: {exc}"
+                        ) from exc
                     if device is not None:
                         results.append(device)
                         if mode is ScanMode.FIRST_MATCH:

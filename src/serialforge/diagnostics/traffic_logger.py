@@ -14,17 +14,17 @@ from uuid import uuid4
 
 from loguru import logger
 
-# PySide6 exposes these C++ types through generated bindings, which pylint
-# cannot resolve even though ty and Python imports can.
-# pylint: disable=no-name-in-module
-from PySide6.QtCore import QObject, Signal
-
 # pylint: enable=no-name-in-module
 from serialforge.advanced import RuntimeConfig, TrafficRecord
 from serialforge.diagnostics.log_file_manager import LogFileManager
 from serialforge.enums import SendRoute
 from serialforge.errors import ConfigError
 from serialforge.models import CommandSpec, EventSpec, LogConfig
+
+# PySide6 exposes these C++ types through generated bindings, which pylint
+# cannot resolve even though ty and Python imports can.
+# pylint: disable=no-name-in-module
+from serialforge.qt_core import QObject, Signal
 
 _TEXT_ESCAPE_TABLE: dict[int, str] = str.maketrans(
     {"\\": "\\\\", "\r": "\\r", "\n": "\\n", "|": "\\x7C"}

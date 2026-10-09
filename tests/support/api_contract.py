@@ -7,7 +7,7 @@ import inspect
 from dataclasses import fields, is_dataclass
 from enum import Enum
 from types import ModuleType
-from typing import Any
+from typing import Any, get_overloads
 
 import serialforge
 import serialforge.advanced as advanced
@@ -35,6 +35,14 @@ def class_contract(cls: type[Any]) -> dict[str, Any]:
             methods[name] = str(inspect.signature(value))
         elif isinstance(value, property) and value.fget is not None:
             properties[name] = str(inspect.signature(value.fget))
+    result["overloads"] = {
+        name: [
+            str(inspect.signature(overload))
+            for overload in get_overloads(value)
+        ]
+        for name, value in vars(cls).items()
+        if inspect.isfunction(value) and get_overloads(value)
+    }
     result["methods"] = methods
     result["properties"] = properties
     tree = ast.parse(inspect.getsource(cls))
@@ -49,7 +57,9 @@ def class_contract(cls: type[Any]) -> dict[str, Any]:
             and node.value.func.id == "Signal"
         ):
             for target in node.targets:
-                if isinstance(target, ast.Name):
+                if isinstance(target, ast.Name) and not target.id.startswith(
+                    "_"
+                ):
                     signals[target.id] = ast.unparse(node.value)
     result["signals"] = signals
     if is_dataclass(cls):
@@ -79,7 +89,7 @@ def public_snapshot() -> dict[str, Any]:
         key = module.__name__.removeprefix("serialforge.")
         result[key] = module.__all__
         for name in module.__all__:
-            value = vars(module)[name]
+            value = getattr(module, name)
             if inspect.isclass(value):
                 classes[f"{module.__name__}.{name}"] = class_contract(value)
     result["classes"] = classes

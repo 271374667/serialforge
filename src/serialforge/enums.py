@@ -8,6 +8,7 @@ from enum import IntEnum, StrEnum
 class CommandStatus(StrEnum):
     """Terminal status reported for a command."""
 
+    NONE = "none"
     OK = "ok"
     TIMEOUT = "timeout"
     DISCONNECTED = "disconnected"
@@ -31,6 +32,7 @@ class ConnectionState(StrEnum):
 class ResponseMode(StrEnum):
     """Expected response shape for a command."""
 
+    NONE = "none"
     NO_REPLY = "no_reply"
     SINGLE = "single"
     MULTI = "multi"
@@ -118,6 +120,7 @@ class CommandPriority(IntEnum):
 class SendRoute(StrEnum):
     """How a send target was resolved."""
 
+    NONE = "none"
     SPEC = "spec"
     MATCHED = "matched"
     RAW = "raw"
@@ -127,3 +130,21 @@ class TimeoutPolicy(StrEnum):
     """Special timeout policies accepted by command declarations."""
 
     AUTO = "auto"
+
+
+class SpecRole(StrEnum):
+    """Distinguish requests from unsolicited device declarations."""
+
+    COMMAND = "command"
+    EVENT = "event"
+
+
+class MessageCategory(StrEnum):
+    """Identify the meaning of one received observation."""
+
+    COMMAND_RESULT = "command_result"
+    RESPONSE_FRAME = "response_frame"
+    DEVICE_EVENT = "device_event"
+    STREAM_FRAME = "stream_frame"
+    UNKNOWN_FRAME = "unknown_frame"
+    RAW_RECEIVE = "raw_receive"

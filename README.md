@@ -1,138 +1,104 @@
 # serialforge
 
-> 适用版本: 0.0.1  |  当前里程碑: M7
+> 适用版本: 0.0.1 | 公共 API 改造 R1–R5
 
-`serialforge` 是面向 Windows 10/11 x64 应用的 PySide6 串口通讯库。库只依赖
-QtCore 的信号、槽和线程，提供设备发现、命令调度、自动重连和流量日志。
-库不包含任何具体设备业务命令，业务命令由使用方声明。
+面向 Windows 10/11 x64、Python 3.11–3.14 的串口通讯库。仅使用 QtCore，
+支持 PySide6 和 PyQt6；导入不会创建应用、线程、串口、文件或日志 sink。
+设备指令由使用方声明，库负责发现、调度、解析、重连和回调。
 
-支持 Python 3.11–3.14、`PySide6-Essentials>=6.11.2`、`pyserial>=3.5` 和
-`loguru>=0.7`。较旧 Qt 绑定的信号连接存在与业务 `connect()` 的名称冲突；6.11.2
-是本次通过完整套件的保守下限，不表示所有中间版本都已逐一验证。导入
-`serialforge` 不会创建 Qt 应用、线程、文件或日志 sink。
+```powershell
+uv add "serialforge[pyside6]"  # 或 serialforge[pyqt6]
+```
+
+同时安装两种绑定时，启动前设置 `QT_API=pyside6` 或 `QT_API=pyqt6`；已加载的
+绑定与设置必须一致。本轮保持 Python 3.11 下限，未加入 Qt5 支持。
 
 ## 最小示例
 
-下例在仓库中运行，使用 `tests.support` 的本地测试替身。客户 wheel 和 sdist 均不包含
-测试替身、`tests`、`examples` 或 `serialforge.testing`。使用方必须创建
-`QCoreApplication`、注册命令、等待连接信号，再发送命令；`result.spec` 保留原始对象：
+仅通过 `SerialForge` 完成配置、声明、连接和同步取结果。以下可在仓库中直接运行；
+`tests.support` 只提供无硬件演示后端，不进入客户 wheel/sdist。
 
 ```python
-from dataclasses import dataclass
-
-from PySide6.QtCore import QCoreApplication, QTimer
-
-from serialforge import (
-    CommandSpec, ConnectionState, DeviceProfile, SerialHandler,
-)
+from serialforge import SerialForge
 from tests.support import FakeBackend, SimulatedDevice, use_fake_backend
 
-
-@dataclass(frozen=True)
-class VersionInfo:
-    version: str
-
-
-VERSION = CommandSpec(
-    "Version",
-    r"Software version (?P<version>\d+\.\d+)",
-    VersionInfo,
-)
-
-app = QCoreApplication.instance() or QCoreApplication([])
-profile = DeviceProfile(
-    vid_pid=[(0x067B, 0x23A3)],
-    baudrates=[115200],
-    probe=VERSION,
-)
-
-def on_state(state):
-    if state is ConnectionState.CONNECTED:
-        handler.send(VERSION)
-
-
-def on_result(result):
-    assert result.spec is VERSION
-    assert result.ok
-    assert result.data == VersionInfo("1.02")
-    print(result.data)
-    app.exit(0)
-
-
 backend = FakeBackend([
-    SimulatedDevice(0x067B, 0x23A3, port="SIM-README", responses={
-        b"Version\r\n": b"Software version 1.02\r\n",
+    SimulatedDevice(None, None, port="SIM-README", responses={
+        b"Version\r\n": b"VERSION:1.02\r\n",
     }),
 ])
 with use_fake_backend(backend):
-    handler = SerialHandler(profile)
-    handler.register(VERSION)
-    handler.connection_state_changed.connect(on_state)
-    handler.command_finished.connect(on_result)
-    handler.error_occurred.connect(lambda error: app.exit(1))
-    deadline = QTimer()
-    deadline.setSingleShot(True)
-    deadline.timeout.connect(lambda: app.exit(1))
-    deadline.start(3000)
-    handler.connect()
+    device = SerialForge(application="core")
+    device.configure(baudrates=[115200], probe="Version",
+                     probe_pattern=r"VERSION:.+")
+    version = device.add("Version", r"VERSION:(?P<version>.+)", dict)
+    device.connect("SIM-README")
     try:
-        assert app.exec() == 0
+        result = device.send_sync(version, context={"row": 1})
+        assert result.spec is version
+        assert result.data == {"version": "1.02"}
+        print(result.data, result.context)
     finally:
-        deadline.stop()
-        handler.disconnect()
+        device.disconnect()
 ```
 
-`connect()` 异步执行，支持无参自动发现、指定端口名、指定已探测的 `DeviceInfo`。
-真实设备使用相同的注册和信号流程，删除上述假后端上下文即可。
-`DeviceFinder.find()` 阻塞返回发现列表；应用界面应使用 `find_async()`。
+真机移除假后端上下文，端口改为真实端口或无参自动发现。GUI 中先创建自己的
+Qt 应用，再在主线程创建 `SerialForge()`。`connect()` 和 `scan()` 阻塞返回；
+要保持界面响应，由应用自己的工作线程调用，扫描没有完成或进度信号。
+`scan(baudrates=[115200], probe="Version", probe_pattern=r"VERSION:.+")`
+直接配置并返回 `list[DeviceInfo]`；也支持已有 `DeviceProfile`，扫描不会自动连接。
 
-串口句柄由 I/O 工作线程管理；Qt 自动连接的 `QObject` 槽在接收对象所属线程运行。
-跨线程接收建议使用应用线程创建的 `QObject` 和 `@Slot` 方法，保持 Qt 事件循环运行，
-并保留 handler/finder 对象。`send()` 可从任意线程调用，立即返回可取消的 ticket；
-`send_and_wait()` 只允许在没有运行 Qt 事件循环的脚本线程调用。退出前调用
-`disconnect()`，它会等待 I/O 线程停止，也挂接了 `aboutToQuit`。
+## 声明与发送
 
-## 无硬件示例
+`device.add(spec)` 返回传入的原对象；`device.add("Read", r"VALUE:.+")`
+则内部构建统一 `Spec`。响应命令的 request/pattern 必填，默认 mode=SINGLE；
+默认 result_type=str 返回整段匹配帧，命名组字典须显式传 dict。事件写成
+`device.add(pattern=r"ALARM:.+")`；只发送命令必须显式 mode=ResponseMode.NO_REPLY。
+MULTI 必须显式选择模式，并在 count>0 与非空 until 中选一个。可选值缺省为
+count=-1、until/error_pattern/parser=""、total_timeout_s=-1.0，不接受 None。
 
-`examples/` 下的三个脚本用内存后端替换串口边界，不需要真实设备：
+`send_sync(target, wait_timeout_s=3.0, params=..., context=...) -> Message`
+和 `send_async(target, timeout_s=3.0, params=..., context=...) -> CommandCall`
+处于同级。target 可以是已注册声明或完整命令文本，文本不接受额外 params。
+占位符参数通过 params 字典传递；context 是每次调用独立的只读浅快照，
+保留在返回消息和调用句柄中，不发送到设备，也不参与协议匹配。
+
+异步消费推荐 `device.send_async(spec, context={"row": row}).add_done_callback(consume)`。
+consume 是只接收一个 Message 的函数，闭包可捕获控件或其他状态。回调始终排队到
+Qt 应用主线程，必须保持事件循环。默认 3 秒从提交开始，包含排队、响应与 GUI
+回调投递；超时/失败不调用成功回调。结果已成功但 GUI 堵塞超过期限时，result()
+仍可取成功结果，闭包不再运行。关闭界面时 cancel()，释放其待执行闭包。
+
+同步失败直接抛出 `serialforge.errors` 的执行异常；异步失败通过 call.result()
+重抛，未完成查询抛 CommandNotReadyError。STREAM 只能异步发送，帧从 received
+取得，直到 cancel() 或调用时限结束。未归属命令的后台错误由 check_errors() 抛出。
+
+## 收发观察与日志
+
+门面仅公开三个信号：`connection_state_changed(ConnectionState)`、
+`received(Message)` 和 `raw_sent(bytes)`。received 的 category 区分 RAW_RECEIVE、
+RESPONSE_FRAME、COMMAND_RESULT、DEVICE_EVENT、STREAM_FRAME、UNKNOWN_FRAME。
+结果信号与同步返回/异步 result()/回调共享同一个最终 Message 对象。
+
+滚动日志只选 RAW_RECEIVE 的 raw_data 和 raw_sent 的 bytes：这是完整实际读写字节，
+包含结束符、回显、探测、初始化、心跳和重试。raw_sent 只含底层确认接收的字节，
+部分写入只记录接收的前缀。解析帧和终态来自同一物理回复，混入日志会重复。
+并发扫描的裸 TX bytes 没有端口字段。两个观察信号在主线程投递，独立于日志开关。
+traffic_logged 不再作为公开信号；库内 loguru DEBUG/文件日志保持默认静默。
+
+## 示例与兼容迁移
 
 ```powershell
-uv run python examples/quick_start.py    # 五种取信息方式：单发单收/单发多收/流式/主动上报/无回复
-uv run python examples/auto_connect.py   # 参数 + 探测指令自动发现并连接设备
-uv run python examples/interactive.py    # while + input 实时交互
+uv run python examples/quick_start.py
+uv run python examples/auto_connect.py
+uv run python examples/interactive.py
 ```
 
-假后台与设备指令集只写一份，在 `examples/virtual_device.py`（模块顶部是完整指令集表），
-三个示例里因此只有 serialforge 的调用。三个示例都是面向对象的，模块顶层只有
-`if __name__ == "__main__":`。README 代码和示例都由 `tests/test_examples.py` 实际运行；
-wheel 冒烟时在源码目录之外复制这些验收输入。
-
-## 添加命令
-
-1. 在使用方代码、`examples/` 或 `tests/` 中定义一个 `CommandSpec`，包括请求文本、
-   响应正则和可选的 dataclass 结果类型。
-2. 用同一个对象调用 `handler.register(SPEC)`。库不会隐式注册命令。
-3. 使用 `handler.send(SPEC)`，在 `command_finished` 中通过
-   `result.spec is SPEC` 分支处理结果。
-
-`request` 可以有 `{value}` 占位符，发送时用 `handler.send(SPEC, value=...)`。
-`send("命令文本")` 先匹配已注册声明，匹配不到时默认作为原始文本发送；设置
-`allow_raw_text=False` 可拒绝这种发送。参数和文本不能含控制字符或内嵌行终止符。
-`pattern` 使用命名捕获组；不带 `pattern` 为 NO_REPLY，设置 `count` 或 `until` 为
-MULTI，STREAM 必须显式指定。异常子类在 `serialforge.errors`。
-
-业务命令不能放入 `src/serialforge/`。未匹配的主动上报通过 `event_received` 发送，
-其中 `event.spec` 可能是已注册的 `EventSpec`、STREAM 命令或 `None`。
-
-## 配置与日志
-
-日常代码只需要 `DeviceProfile`；串口、定界和运行时细项通过 `serialforge.advanced`
-中的 `SerialConfig`、`FramingConfig`、`RuntimeConfig` 配置。发送终止符和接收定界是
-两个独立设置；没有结束符的回复使用 `FramingMode.SILENCE_GAP` 与正数
-`silence_gap_s`。
-
-库内日志只通过 loguru 以 DEBUG 级别输出，默认关闭。需要按连接保存文件时传入
-`LogConfig(enabled=True, save_to_file=True, dir=...)`；日志目录不可写不会使连接崩溃。
+过渡期顶层保留原 15 个名字，再加 SerialForge/Spec/Message/MessageCategory，共 19 个。
+日常使用统一 API；进阶配置在 `serialforge.advanced`，异常在 `serialforge.errors`。
+SerialHandler 保留 register/unregister/send/send_and_wait 方法桥接，但不再提供旧结果、
+事件、错误和流量信号。旧 CommandSpec/EventSpec 构造及身份语义仍可用；新返回值
+统一为 Message，不保证旧结果类型的 isinstance。下一轮移除兼容入口的版本由用户决定。
 
 ## Windows 范围
 

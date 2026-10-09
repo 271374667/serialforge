@@ -1,7 +1,7 @@
 # 0007_Message与收发观察契约
 
 > 分类: knowledge/software | 创建: 2026-10-09 | 适用范围: Message、received/raw_sent、私有诊断
-> 状态: R1 已批准的目标契约；R2–R5 未实现，当前运行 API 仍为旧基线
+> 状态: R2–R4 已接入源码；R5 双绑定与完整矩阵验收进行中
 
 ## 5. 统一消息 Message
 
