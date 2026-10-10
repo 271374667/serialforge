@@ -19,9 +19,11 @@ T = TypeVar("T")
 class Message(Generic[T]):
     """Carry parsed data, original declaration and per-invocation context.
 
-    RAW_RECEIVE retains exact read chunks in raw_data. Other categories retain
-    delimiter-free frames in raw_frames. Context and params are shallow,
-    immutable snapshots; context is never transmitted or used for matching.
+    RAW_RECEIVE retains complete nonempty lines with their endings in raw_data
+    for LINE framing, and nonempty read chunks for other framing modes.
+    Other categories retain delimiter-free frames in raw_frames. Context and
+    params are shallow, immutable snapshots; context is never transmitted or
+    used for matching.
     """
 
     category: MessageCategory

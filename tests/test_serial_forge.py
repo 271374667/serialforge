@@ -22,8 +22,8 @@ from serialforge import (
     SerialHandler,
     Spec,
 )
-from serialforge.advanced import SerialConfig
-from serialforge.enums import SpecRole
+from serialforge.advanced import FramingConfig, SerialConfig
+from serialforge.enums import ConnectionState, FramingMode, SpecRole
 from serialforge.errors import (
     CommandCancelledError,
     CommandDisconnectedError,
@@ -76,6 +76,12 @@ def device() -> Iterator[SerialForge]:
                     b"Bad\r\n": b"VALUE:bad\r\n",
                     b"Read 1\r\n": b"VALUE:1:41\r\n",
                     b"Read 2\r\n": b"VALUE:2:42\r\n",
+                    b"SN_INFO_GET\r\n": [
+                        b">",
+                        b"SN_INFO_GET=B0002B",
+                        b"\r",
+                        b"\n",
+                    ],
                 },
             )
         ]
@@ -189,6 +195,158 @@ def test_sync_response_and_exact_signal_identity(device: SerialForge) -> None:
         )
         == b"VALUE:42\r\n"
     )
+
+
+@pytest.mark.parametrize(
+    ("chunks", "expected"),
+    [
+        ([b"", b"\r\n", b""], []),
+        (
+            [b">", b"SN_INFO_GET=B0002B", b"\r\n"],
+            [b">SN_INFO_GET=B0002B\r\n"],
+        ),
+        (
+            [b">SN_INFO_GET=B0002B\r", b"", b"\n"],
+            [b">SN_INFO_GET=B0002B\r\n"],
+        ),
+        (
+            [b"FIRST\r\nSECOND\r\nTH", b"IRD\r\n"],
+            [b"FIRST\r\n", b"SECOND\r\n", b"THIRD\r\n"],
+        ),
+    ],
+)
+def test_raw_receive_emits_only_nonempty_complete_lines(
+    chunks: list[bytes], expected: list[bytes]
+) -> None:
+    """Join fragmented reads and emit each line with its original ending."""
+    app()
+    facade = SerialForge()
+    observed: list[Message[Any]] = []
+    facade.received.connect(observed.append)
+    for chunk in chunks:
+        facade._on_raw_receive(chunk)
+        app().processEvents()
+        assert all(item.raw_data.endswith(b"\r\n") for item in observed)
+    assert [item.raw_data for item in observed] == expected
+    assert all(
+        item.category is MessageCategory.RAW_RECEIVE for item in observed
+    )
+    facade.disconnect()
+
+
+def test_raw_receive_uses_receive_terminator() -> None:
+    """Keep receive line boundaries independent of transmit termination."""
+    app()
+    facade = SerialForge()
+    facade.configure(
+        baudrates=[115200],
+        probe="Probe",
+        probe_pattern="READY",
+        terminator=";",
+        framing=FramingConfig(terminator=b"\n"),
+    )
+    observed: list[Message[Any]] = []
+    facade.received.connect(observed.append)
+    facade._on_raw_receive(b"FIRST;SECOND")
+    app().processEvents()
+    assert not observed
+    facade._on_raw_receive(b"\nTHIRD\n")
+    app().processEvents()
+    assert [item.raw_data for item in observed] == [
+        b"FIRST;SECOND\n",
+        b"THIRD\n",
+    ]
+    facade.disconnect()
+
+
+@pytest.mark.parametrize("boundary", ["disconnect", "reconnect", "configure"])
+def test_raw_receive_discards_partial_lines_at_connection_boundaries(
+    boundary: str,
+) -> None:
+    """Prevent old partial reads from being prepended to a new connection."""
+    app()
+    facade = SerialForge()
+    observed: list[Message[Any]] = []
+    facade.received.connect(observed.append)
+    facade._on_raw_receive(b"STALE")
+    if boundary == "disconnect":
+        facade.disconnect()
+    elif boundary == "reconnect":
+        facade._on_connection_state_changed(ConnectionState.RECONNECTING)
+    else:
+        facade.configure(
+            baudrates=[115200], probe="Probe", probe_pattern="READY"
+        )
+    facade._on_raw_receive(b"FRESH\r\n")
+    app().processEvents()
+    assert [item.raw_data for item in observed] == [b"FRESH\r\n"]
+    facade.disconnect()
+
+
+def test_raw_receive_keeps_parallel_probe_lines_separate() -> None:
+    """Avoid joining fragments read by different scanning threads."""
+    app()
+    facade = SerialForge()
+    observed: list[Message[Any]] = []
+    facade.received.connect(observed.append)
+    barrier = threading.Barrier(2, timeout=2)
+
+    def receive(prefix: bytes) -> None:
+        facade._on_raw_receive(prefix)
+        barrier.wait()
+        facade._on_raw_receive(b"_READY\r\n")
+
+    threads = [
+        threading.Thread(target=receive, args=(prefix,))
+        for prefix in (b"FIRST", b"SECOND")
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=3)
+        assert not thread.is_alive()
+    app().processEvents()
+    assert sorted(item.raw_data for item in observed) == [
+        b"FIRST_READY\r\n",
+        b"SECOND_READY\r\n",
+    ]
+    facade.disconnect()
+
+
+def test_raw_receive_preserves_non_line_protocol_chunks() -> None:
+    """Keep no-terminator protocols observable without waiting for a line."""
+    app()
+    facade = SerialForge()
+    facade.configure(
+        baudrates=[115200],
+        probe="Probe",
+        probe_pattern="READY",
+        framing=FramingConfig(mode=FramingMode.SILENCE_GAP, silence_gap_s=0.01),
+    )
+    observed: list[Message[Any]] = []
+    facade.received.connect(observed.append)
+    facade._on_raw_receive(b"")
+    facade._on_raw_receive(b"READY")
+    app().processEvents()
+    assert [item.raw_data for item in observed] == [b"READY"]
+    facade.disconnect()
+
+
+def test_fragmented_serial_response_emits_one_raw_line(
+    device: SerialForge,
+) -> None:
+    """Deliver one complete raw line through the real read-thread bridge."""
+    observed: list[Message[Any]] = []
+    device.received.connect(observed.append)
+    spec = device.add("SN_INFO_GET", r">SN_INFO_GET=(?P<serial>\w+)")
+    result = device.send_sync(spec)
+    wait(lambda: any(item is result for item in observed))
+    assert [
+        item.raw_data
+        for item in observed
+        if item.category is MessageCategory.RAW_RECEIVE
+    ] == [b">SN_INFO_GET=B0002B\r\n"]
+    assert result.data == ">SN_INFO_GET=B0002B" and result.spec is spec
 
 
 def test_callback_main_thread_closure_order_and_late_replay(
@@ -350,6 +508,38 @@ def test_scan_returns_results_and_observes_probe_bytes() -> None:
     assert [item.port for item in found] == ["SCAN"]
     assert sent == [b"Probe\r\n"]
     assert b"".join(item.raw_data for item in received) == b"READY\r\n"
+    assert all(item.closed for item in backend.transports)
+    facade.disconnect()
+
+
+def test_scan_discards_unterminated_reads_from_previous_baudrate() -> None:
+    """Start a fresh raw line after a failed probe on the same thread."""
+    app()
+    backend = FakeBackend(
+        [
+            SimulatedDevice(
+                None,
+                None,
+                port="SCAN-RATES",
+                baudrate=115200,
+                responses={b"Probe\r\n": [b"RE", b"ADY\r\n"]},
+            )
+        ]
+    )
+    facade = SerialForge()
+    observed: list[Message[Any]] = []
+    facade.received.connect(observed.append)
+    with use_fake_backend(backend):
+        found = facade.scan(
+            baudrates=[9600, 115200],
+            probe="Probe",
+            probe_pattern="READY",
+            probe_timeout_s=0.05,
+            serial=SerialConfig(settle_time_s=0),
+        )
+    app().processEvents()
+    assert [item.port for item in found] == ["SCAN-RATES"]
+    assert [item.raw_data for item in observed] == [b"READY\r\n"]
     assert all(item.closed for item in backend.transports)
     facade.disconnect()
 

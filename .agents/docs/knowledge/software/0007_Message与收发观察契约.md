@@ -15,7 +15,7 @@ class Message(Generic[T]):
     spec: Spec[T] | None = None               # 声明对象；未知帧/RAW 可以没有
     request_id: str = ""                      # 没有调用关联
     raw_frames: tuple[bytes, ...] = ()        # 定界后的帧，不含结束标记
-    raw_data: bytes = b""                     # RAW_RECEIVE 的实际 read 字节
+    raw_data: bytes = b""                     # LINE 的完整行 / 非行模式的 read 字节
     context: Mapping[str, object] = field(default_factory=dict)
     status: CommandStatus = CommandStatus.NONE
     route: SendRoute = SendRoute.NONE
@@ -35,14 +35,16 @@ class Message(Generic[T]):
 
 | category | spec/request_id/context | 有效载荷 | 用途 |
 | --- | --- | --- | --- |
-| RAW_RECEIVE | None / "" / 空映射 | raw_data 为本次真实 read 字节，含设备发送的结束标记 | 滚动 RX 原始日志，处理前发出 |
+| RAW_RECEIVE | None / "" / 空映射 | LINE 的非空完整行，保留接收结束符；非行模式为非空 read 字节 | 滚动 RX 原始日志，解析观察前发出 |
 | RESPONSE_FRAME | 对应命令/ID/context | 单个匹配帧和解析值 | MULTI 中间帧等按帧观察 |
 | COMMAND_RESULT | 原命令或 RAW 的 None / 调用 ID / context | SINGLE 单值、MULTI 列表或无回复 None | 同步返回、异步回调、统一终态观察 |
 | DEVICE_EVENT | 原事件 / "" / 空映射 | 单帧解析值 | 主动上报 |
 | STREAM_FRAME | 原 STREAM 命令 / 调用 ID / context | 当前流帧 | 持续数据 |
 | UNKNOWN_FRAME | None / "" / 空映射 | 帧解码原文 | 未匹配的完整帧 |
 
-RAW_RECEIVE 是字节块，不保证一块是一帧。先发布 RAW_RECEIVE，再做定界/匹配；回显、半包、校验失败字节都能用于日志。解析类别和终态可能与同一批原字节有关：日志只筛选 RAW_RECEIVE，业务筛选其他类别，避免重复显示原数据。
+用户 2026-10-10 要求 received 过滤空内容并按完整行发出，覆盖此前 RAW_RECEIVE 逐 read 转发的约定。LINE 模式先缓存分片，遇到接收结束符后逐行发布 RAW_RECEIVE，保留原结束符；空 read 和只有结束符的空行不发布，未完成的行继续等待。接收结束符取显式 FramingConfig.terminator，否则取 profile.terminator 按 encoding 编码，独立于发送定界配置。
+
+并行探测按读取线程隔离缓存，切换探测端口/波特率、扫描收尾、重新配置、断开及重连时清理半行，避免旧数据混入新会话；LINE 缓存受 FramingConfig 的大小限制，超限通过 check_errors 读取。显式非行模式（SILENCE_GAP/DELIMITED/LENGTH_PREFIX）继续逐非空 read 发布，避免无结束符协议无法观察。命令终态通知仍保留；其他类别的 raw_data 默认 b''，日志仍应只筛选 RAW_RECEIVE。解析类别和终态可能与同一批原字节有关，业务筛选其他类别，避免重复显示原数据。
 
 COMMAND_RESULT 即使无设备回复也可能产生，例如 NO_REPLY 写入成功、TIMEOUT/CANCELLED。received 合并了原 command_finished 的终态语义，因此不是每条 received 都来自物理 RX；category 明确区分它们。失败消息是终态观察数据，不替代 result()/send_sync 的异常处理。
 
@@ -59,7 +61,7 @@ class SerialForge(QObject):
     raw_sent = Signal(bytes)                   # 实际写入串口的原始字节
 ```
 
-- received 合并原 command_finished/event_received，并加入 RAW_RECEIVE 原字节观察。COMMAND_RESULT 每次调用恰一次；RESPONSE_FRAME/事件/流帧按解析语义发布；RAW_RECEIVE 每次非空后台 read 一次。
+- received 合并原 command_finished/event_received，并加入 RAW_RECEIVE 原字节观察。COMMAND_RESULT 每次调用恰一次；RESPONSE_FRAME/事件/流帧按解析语义发布；RAW_RECEIVE 在 LINE 模式每条非空完整行一次，其他模式每次非空后台 read 一次。
 - raw_sent 是软件实际发送的 bytes，含编码结果、发送结束符、校验等；在后端确认接受字节后发，不在排队时发。部分写入只发送实际已接受的前缀，再抛写入异常；无法确定驱动是否接受时不伪造成功发送。
 - 所有扫描探测、初始化、心跳、重试、RAW 和业务命令的实际串口写入也纳入 raw_sent。扫描临时端口的数据同样纳入 RAW_RECEIVE；并行扫描下裸 bytes 无端口信息，跨端口归属不保证，若以后需要精确多端口日志须另评审带端口元信息的发送载荷。
 - 门面内部主线程桥接统一派发 received/raw_sent，普通闭包消费也在主线程；信号记录包含观察时间而非保证纳秒级物理线序，多端口并发没有全局物理先后顺序。
@@ -67,7 +69,7 @@ class SerialForge(QObject):
 - 删除 scan_finished、scan_progress、error_occurred、traffic_logged，不提供隐含的第二套完成/错误信号。扫描由应用自建工作线程调用 scan，获取返回列表或捕获异常。
 - 主线程事件循环未运行时，queued 观察不保证即时交付；同步 API 仍可独立工作。
 
-原字节观察在库侧不节流/截断/合并，界面端应自行批量滚动显示。传输/调度线程不得因 GUI 显示阻塞；高吞吐场景需验证 Qt 事件队列内存，用户自行降低采样频率不等于库可以默默丢失原始观察。若以后加入有损限流必须显式配置并提供丢弃计数。
+除用户要求的 LINE 分片缓存、空行过滤与会话结束时丢弃半行，原字节观察在库侧不节流，界面端应自行批量滚动显示。传输/调度线程不得因 GUI 显示阻塞；高吞吐场景需验证 Qt 事件队列内存。若以后加入有损限流必须显式配置并提供丢弃计数。
 
 ### 8.2 traffic_logged 当前到底做什么
 

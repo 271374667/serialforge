@@ -31,6 +31,7 @@ from serialforge.discovery.device_finder import DeviceFinder
 from serialforge.enums import (
     ConnectionState,
     Correlation,
+    FramingMode,
     MessageCategory,
     ResponseMode,
     ScanMode,
@@ -38,7 +39,12 @@ from serialforge.enums import (
     SpecRole,
     TimeoutPolicy,
 )
-from serialforge.errors import CommandError, ConfigError, _without_tracebacks
+from serialforge.errors import (
+    CommandError,
+    ConfigError,
+    FramingError,
+    _without_tracebacks,
+)
 from serialforge.message import Message
 from serialforge.models import (
     CommandResult,
@@ -59,6 +65,7 @@ from serialforge.qt_core import (
     Slot,
 )
 from serialforge.spec import Spec
+from serialforge.transport import FrameSplitter
 
 T = TypeVar("T")
 _CORE_APPLICATION: QCoreApplication | None = None
@@ -76,7 +83,7 @@ class SerialForge(QObject):
     main thread. Only QtCore is imported.
 
     Attributes:
-        received: Message for raw chunks, response frames, events and results.
+        received: Message for complete raw lines, frames, events and results.
         raw_sent: Exact bytes accepted by the serial backend, including probes.
         connection_state_changed: New ConnectionState on the main thread.
     """
@@ -117,6 +124,8 @@ class SerialForge(QObject):
         self._log: LogConfig = log or LogConfig()
         self._allow_raw_text: bool = allow_raw_text
         self._lock: threading.RLock = threading.RLock()
+        self._receive_framing: FramingConfig = FramingConfig()
+        self._receive_splitters: dict[int, FrameSplitter] = {}
         self._calls: dict[str, CommandCall[Any]] = {}
         self._finder: DeviceFinder | None = None
         self._scanning: bool = False
@@ -230,15 +239,54 @@ class SerialForge(QObject):
         )
 
     def _on_raw_receive(self, data: bytes) -> None:
-        """Retain exact read chunks before echo removal or byte framing."""
-        self._publish(
-            Message(
-                MessageCategory.RAW_RECEIVE, time.monotonic(), raw_data=data
-            )
-        )
+        """Join LINE reads before delivery, retaining the receive terminator.
+
+        Other framing modes keep nonempty read chunks. Separate splitters
+        prevent parallel probe threads from mixing their partial lines.
+        """
+        if not data:
+            return
+        with self._lock:
+            framing = self._receive_framing
+            if framing.mode is FramingMode.LINE:
+                source = threading.get_ident()
+                splitter = self._receive_splitters.get(source)
+                if splitter is None:
+                    splitter = FrameSplitter(framing)
+                    self._receive_splitters[source] = splitter
+                try:
+                    frames = splitter.feed(data)
+                except FramingError as error:
+                    self._receive_splitters.pop(source, None)
+                    self._on_error(error)
+                    return
+                chunks = [
+                    frame + framing.terminator for frame in frames if frame
+                ]
+            else:
+                chunks = [data]
+            for chunk in chunks:
+                self._publish(
+                    Message(
+                        MessageCategory.RAW_RECEIVE,
+                        time.monotonic(),
+                        raw_data=chunk,
+                    )
+                )
+
+    def _on_connection_state_changed(self, state: ConnectionState) -> None:
+        """Clear partial lines when changing serial sessions and queue state."""
+        with self._lock:
+            if state is not ConnectionState.CONNECTED:
+                self._receive_splitters.clear()
+        self._dispatch(lambda: self.connection_state_changed.emit(state))
 
     def _on_raw_sent(self, data: bytes) -> None:
         """Queue bytes actually accepted by the backend."""
+        with self._lock:
+            if self._scanning or self.state is ConnectionState.PROBING:
+                # One probe thread may try multiple ports or baudrates.
+                self._receive_splitters.pop(threading.get_ident(), None)
         self._dispatch(lambda: self.raw_sent.emit(data))
 
     def _on_error(self, error: Exception) -> None:
@@ -356,6 +404,9 @@ class SerialForge(QObject):
                 )
             candidate = CommandRegistry(profile.terminator)
             candidate.register(*self._registry.commands, *self._registry.events)
+            receive_framing = profile.framing or FramingConfig(
+                terminator=profile.terminator.encode(profile.encoding)
+            )
             core = HandlerCore(
                 profile, log=self._log, allow_raw_text=self._allow_raw_text
             )
@@ -371,9 +422,7 @@ class SerialForge(QObject):
             core.error_occurred.connect(self._on_error, direct)
             core._dispatcher.response_frame.connect(self._on_response, direct)
             core.connection_state_changed.connect(
-                lambda state: self._dispatch(
-                    lambda: self.connection_state_changed.emit(state)
-                ),
+                self._on_connection_state_changed,
                 direct,
             )
             if self._core is not None:
@@ -386,6 +435,8 @@ class SerialForge(QObject):
             self._profile = profile
             self._registry = candidate
             self._core = core
+            self._receive_framing = receive_framing
+            self._receive_splitters.clear()
 
     @overload
     def add(self, spec: Spec[T], /) -> Spec[T]: ...
@@ -583,12 +634,14 @@ class SerialForge(QObject):
             finder._raw_received = self._on_raw_receive
             finder._raw_sent = self._on_raw_sent
             self._finder = finder
+            self._receive_splitters.clear()
             self._scanning = True
             self._scan_done.clear()
         try:
             return finder.find(mode, port=port or None)
         finally:
             with self._lock:
+                self._receive_splitters.clear()
                 self._scanning = False
                 self._finder = None
                 self._scan_done.set()
@@ -629,6 +682,8 @@ class SerialForge(QObject):
         core = self._core
         if core is not None:
             core.disconnect()
+        with self._lock:
+            self._receive_splitters.clear()
 
     def _require_core(self) -> HandlerCore:
         """Reject operations that require an unset profile."""
