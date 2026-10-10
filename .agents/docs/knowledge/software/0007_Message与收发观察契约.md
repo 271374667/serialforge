@@ -48,6 +48,14 @@ class Message(Generic[T]):
 
 COMMAND_RESULT 即使无设备回复也可能产生，例如 NO_REPLY 写入成功、TIMEOUT/CANCELLED。received 合并了原 command_finished 的终态语义，因此不是每条 received 都来自物理 RX；category 明确区分它们。失败消息是终态观察数据，不替代 result()/send_sync 的异常处理。
 
+2026-10-10 补充：统一发布出口过滤非 COMMAND_RESULT 且 raw_data 与所有 raw_frames 均空的消息，避免定界空行又以空解析帧发布。COMMAND_RESULT 仍保留终态语义及对象身份。只打印原始 RX 时先判断 raw_data 非空；解析帧与结果消息的 raw_data 默认 b''，直接打印每条消息的该字段会造成“仍收到空字符串”的错觉，不能为此丢弃合法结果或 STREAM 数据。
+
+```python
+def receive(message: Message[object]) -> None:
+    if message.raw_data:
+        print("Received:", message.raw_data)
+```
+
 params/context 只读，业务 data 不承诺递归不可变。Message 的对象字段可以 None，值字段保持字符串/枚举/数值/集合类型。
 
 ## 8. 信号收敛与 traffic_logged 说明

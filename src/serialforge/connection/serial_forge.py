@@ -157,7 +157,13 @@ class SerialForge(QObject):
         self._dispatch_requested.emit(action)
 
     def _publish(self, message: Message[Any]) -> None:
-        """Queue the exact public message object for observation."""
+        """Queue nonempty receive data and the exact command result object."""
+        if (
+            message.category is not MessageCategory.COMMAND_RESULT
+            and not message.raw_data
+            and not any(message.raw_frames)
+        ):
+            return
         self._dispatch(lambda: self.received.emit(message))
 
     def _on_result(self, result: CommandResult) -> None:

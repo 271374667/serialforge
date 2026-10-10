@@ -74,6 +74,7 @@ def device() -> Iterator[SerialForge]:
                     b"Read\r\n": b"VALUE:42\r\n",
                     b"Many\r\n": b"VALUE:1\r\nVALUE:2\r\n",
                     b"Bad\r\n": b"VALUE:bad\r\n",
+                    b"BlankRead\r\n": b"\r\nVALUE:42\r\n\r\n",
                     b"Read 1\r\n": b"VALUE:1:41\r\n",
                     b"Read 2\r\n": b"VALUE:2:42\r\n",
                     b"SN_INFO_GET\r\n": [
@@ -347,6 +348,36 @@ def test_fragmented_serial_response_emits_one_raw_line(
         if item.category is MessageCategory.RAW_RECEIVE
     ] == [b">SN_INFO_GET=B0002B\r\n"]
     assert result.data == ">SN_INFO_GET=B0002B" and result.spec is spec
+
+
+def test_received_skips_empty_frames_and_keeps_command_results(
+    device: SerialForge,
+) -> None:
+    """Ignore blank lines from the parser without losing command delivery."""
+    observed: list[Message[Any]] = []
+    callbacks: list[Message[Any]] = []
+    device.received.connect(observed.append)
+    spec = device.add("BlankRead", r"VALUE:(?P<value>\d+)", int)
+    call = device.send_async(spec).add_done_callback(callbacks.append)
+    wait(
+        lambda: (
+            bool(callbacks) and any(item is callbacks[0] for item in observed)
+        )
+    )
+    assert device._core is not None
+    device._core._dispatcher.flush_events()
+    app().processEvents()
+    assert callbacks[0] is call.result() and callbacks[0].data == 42
+    assert [
+        item.raw_data
+        for item in observed
+        if item.category is MessageCategory.RAW_RECEIVE
+    ] == [b"VALUE:42\r\n"]
+    assert all(
+        item.raw_data or any(item.raw_frames)
+        for item in observed
+        if item.category is not MessageCategory.COMMAND_RESULT
+    )
 
 
 def test_callback_main_thread_closure_order_and_late_replay(
