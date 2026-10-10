@@ -7,8 +7,8 @@
 | 项目 | 内容 |
 | --- | --- |
 | 名称 | serialforge |
-| 简介 | 面向 Windows 10/11 x64 的 PySide6/PyQt6 QtCore 串口通讯库 |
-| 技术栈 | Python 3.11+、uv、hatchling、PySide6-Essentials/PyQt6 可选绑定、pyserial、loguru |
+| 简介 | 面向 Windows 10/11 x64 的 PySide6/PyQt6/PyQt5 QtCore 串口通讯库 |
+| 技术栈 | Python 3.11+、uv、hatchling、PySide6-Essentials/PyQt6/PyQt5 可选绑定、pyserial、loguru |
 | 入口 | `src/serialforge/__init__.py`；开发脚本在 `scripts/` |
 | 构建 | `uv build` |
 | 测试 | `uv run pytest`；阶段 CI 为 `uv run python scripts/ci.py` |
@@ -51,5 +51,5 @@
 - 发现文档与代码不符时立即更新 `.agents/ARCHITECTURE.md`。
 - 长任务使用 `.agents/docs/todo/README.md` 唯一调度索引；同一时间最多一个激活任务。
 - 本次公共 API 改造连续实施至 R5 完成；收尾只对本次修改文件运行格式化与类型检查，并如实记录 ty、Windows 真机和硬件未验证项。
-- 公共 API 目标：`SerialForge`、`Spec`、`Message`；主线程 `add_done_callback`，异步默认 3 秒且超时不回调；`received`/`raw_sent`，公开移除 `traffic_logged`；窄 Qt6 适配不引入 QtPy。实际交付契约与验收记录见知识索引 0005。
+- 公共 API 目标：`SerialForge`、`Spec`、`Message`；主线程 `add_done_callback`，异步默认 3 秒且超时不回调；`received`/`raw_sent`，公开移除 `traffic_logged`；窄 QtCore 适配（PySide6/PyQt6/PyQt5）不引入 QtPy。实际交付契约与验收记录见知识索引 0005。
 - `project-ai-normalize` 脚手架当前含冲突标记，不能执行；本次规范目录按其模板手动生成，工具修复留作项目外问题。

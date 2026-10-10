@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import subprocess
 import sys
@@ -42,24 +43,23 @@ assert not any(name.endswith(('.QtGui', '.QtWidgets')) for name in sys.modules)
     assert result.returncode == 0, result.stderr
 
 
-@pytest.mark.parametrize("api", ["pyqt5", "pyside2", "invalid"])
+@pytest.mark.parametrize("api", ["pyside2", "invalid"])
 def test_invalid_binding_selection_raises(api: str) -> None:
-    """Reject Qt5/unknown environment selections before initializing
+    """Reject unsupported or unknown selections before initializing
     bindings.
     """
     result = run("import serialforge", api)
     assert result.returncode != 0 and "QT_API" in result.stderr
 
 
-@pytest.mark.parametrize("loaded", ["PyQt5", "PySide2"])
-def test_preloaded_qt5_raises(loaded: str) -> None:
-    """Refuse to mix Qt5 with the Qt6-only adapter."""
+def test_preloaded_pyside2_raises() -> None:
+    """Refuse to mix the unsupported PySide2 runtime with the adapter."""
     result = run(
         "import sys, types; "
-        f"sys.modules['{loaded}']=types.ModuleType('{loaded}'); "
+        "sys.modules['PySide2']=types.ModuleType('PySide2'); "
         "import serialforge"
     )
-    assert result.returncode != 0 and "Qt5 is already loaded" in result.stderr
+    assert result.returncode != 0 and "PySide2" in result.stderr
 
 
 def test_ambiguous_installed_bindings_require_selection() -> None:
@@ -69,7 +69,7 @@ def test_ambiguous_installed_bindings_require_selection() -> None:
 import importlib.util
 original = importlib.util.find_spec
 def available(name, *args, **kwargs):
-    if name in ('PySide6', 'PyQt6'):
+    if name in ('PySide6', 'PyQt6', 'PyQt5'):
         return object()
     return original(name, *args, **kwargs)
 importlib.util.find_spec = available
@@ -80,18 +80,54 @@ import serialforge
     assert result.returncode != 0 and "set QT_API" in result.stderr
 
 
-def test_multiple_preloaded_bindings_raise() -> None:
-    """Reject multiple loaded runtimes regardless of explicit preference."""
+def test_conflicting_loaded_binding_raises() -> None:
+    """Reject an explicit preference that disagrees with a loaded binding."""
     result = run(
-        """
-import sys, types
-sys.modules['PySide6']=types.ModuleType('PySide6')
-sys.modules['PyQt6']=types.ModuleType('PyQt6')
-import serialforge
-""",
+        "import sys, types; "
+        "sys.modules['PyQt5']=types.ModuleType('PyQt5'); "
+        "import serialforge",
         "pyside6",
     )
+    assert result.returncode != 0 and "conflicts" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "loaded",
+    [
+        ("PySide6", "PyQt6"),
+        ("PySide6", "PyQt5"),
+        ("PyQt6", "PyQt5"),
+    ],
+)
+def test_multiple_preloaded_bindings_raise(loaded: tuple[str, str]) -> None:
+    """Reject multiple loaded runtimes regardless of explicit preference."""
+    code = (
+        "import sys, types\n"
+        + "".join(
+            f"sys.modules['{name}']=types.ModuleType('{name}')\n"
+            for name in loaded
+        )
+        + "import serialforge\n"
+    )
+    result = run(code, "pyside6")
     assert result.returncode != 0 and "multiple Qt bindings" in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("api", "module"),
+    [("pyside6", "PySide6"), ("pyqt6", "PyQt6"), ("pyqt5", "PyQt5")],
+)
+def test_selected_binding_imports_when_installed(api: str, module: str) -> None:
+    """Import QtCore through each binding that is installed in this env."""
+    if importlib.util.find_spec(module) is None:
+        pytest.skip(f"{module} is not installed")
+    result = run(
+        "from serialforge.qt_core import QCoreApplication, Qt, Signal; "
+        "print('ok', QCoreApplication.__module__.split('.')[0])",
+        api,
+    )
+    assert result.returncode == 0, result.stderr
+    assert f"ok {module}" in result.stdout
 
 
 def test_script_core_application_and_main_thread_guard() -> None:

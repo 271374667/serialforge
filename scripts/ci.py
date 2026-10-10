@@ -18,6 +18,12 @@ ROOT = Path(__file__).resolve().parents[1]
 DIST_DIR = ROOT / "outputs" / "01_dist"
 TEMP_DIR = ROOT / "temp" / "0002_m7_ci"
 PYTHON_MATRIX = ("3.11", "3.12", "3.13", "3.14")
+BINDING_EXTRAS = {
+    "pyside6": "PySide6-Essentials>=6.11.2",
+    "pyqt6": "PyQt6>=6.11",
+    "pyqt5": "PyQt5>=5.15.11",
+}
+BINDINGS = tuple(BINDING_EXTRAS)
 IDENTITY_CHECK = (
     "from pathlib import Path; from importlib.metadata import distribution; "
     "import serialforge; module = Path(serialforge.__file__).resolve(); "
@@ -139,11 +145,7 @@ def smoke(wheel: Path, version: str, binding: str = "pyside6") -> None:
             "--with",
             str(wheel.resolve()),
             "--with",
-            (
-                "PySide6-Essentials>=6.11.2"
-                if binding == "pyside6"
-                else "PyQt6>=6.11"
-            ),
+            BINDING_EXTRAS[binding],
         ]
         run([*prefix, "python", "-c", IDENTITY_CHECK], cwd=directory, env=env)
         run(
@@ -180,7 +182,7 @@ def smoke(wheel: Path, version: str, binding: str = "pyside6") -> None:
 def matrix() -> None:
     """Run each Python version with both bindings in separate environments."""
     for version in PYTHON_MATRIX:
-        for binding in ("pyside6", "pyqt6"):
+        for binding in BINDINGS:
             env = environment()
             env["QT_API"] = binding
             env["PYTEST_QT_API"] = binding
@@ -284,7 +286,7 @@ def parse_args() -> argparse.Namespace:
         modes.add_argument(f"--{mode}", action="store_true")
     parser.add_argument(
         "--binding",
-        choices=("pyside6", "pyqt6"),
+        choices=BINDINGS,
         default="pyside6",
         help="Qt binding for wheel smoke",
     )
@@ -310,7 +312,7 @@ def main() -> int:
             source_checks(fast=args.fast)
             if not args.fast:
                 wheel = build_distributions()
-                for binding in ("pyside6", "pyqt6"):
+                for binding in BINDINGS:
                     smoke(wheel, args.python, binding)
                 if not args.lowest:
                     matrix()

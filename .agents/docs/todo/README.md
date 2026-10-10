@@ -4,19 +4,20 @@
 > 被要求「继续任务」时**只读这一个文件**——不要 ls 目录、不要逐个读 todo 文档（省 token）。
 > 维护一律用 `python .agents/tools/taskmgr.py`，不要手改表格。
 > 规则见 `.agents/rules/07_task_tracking.md` §2。
-> 最后更新: 2026-10-09  |  激活任务: 0009_重写 examples_virtual_device.py：设备引擎 + 内存挂载
+> 最后更新: 2026-10-10  |  激活任务: 0010_增加 PyQt5 绑定支持
 
 ## 激活中（同时最多一个）
 
 | 编号 | 任务 | 优先级 | 关联 checkpoint |
 | --- | --- | --- | --- |
-| 0009 | [0009_重写 examples_virtual_device.py：设备引擎 + 内存挂载](./0009_重写 examples_virtual_device.py：设备引擎 + 内存挂载.md) | 高 | checkpoint/0011_虚拟设备示例重写.md |
+| 0010 | [0010_增加 PyQt5 绑定支持](./0010_增加 PyQt5 绑定支持.md) | 高 | - |
 
 ## 排队中（按 优先级 → 编号 排序）
 
 | 编号 | 任务 | 优先级 | 关联 checkpoint |
 | --- | --- | --- | --- |
 | 0007 | [0007_M7_集成演示与发布前验收](./0007_M7_集成演示与发布前验收.md) | 高 | checkpoint/0008_M7-handoff.md |
+| 0009 | [0009_重写 examples_virtual_device.py：设备引擎 + 内存挂载](./0009_重写 examples_virtual_device.py：设备引擎 + 内存挂载.md) | 高 | checkpoint/0011_虚拟设备示例重写.md |
 
 ## 说明
 

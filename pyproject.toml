@@ -28,6 +28,7 @@ classifiers = [
 [project.optional-dependencies]
 pyside6 = ["PySide6-Essentials>=6.11.2"]
 pyqt6 = ["PyQt6>=6.11"]
+pyqt5 = ["PyQt5>=5.15.11"]
 
 [dependency-groups]
 dev = [
@@ -40,6 +41,13 @@ dev = [
     "twine",
     "ty",
     "typing-extensions>=4.6",
+]
+
+[tool.uv]
+# 只面向 Windows x64：PyQt5-Qt5 等包的较新版本缺少 win_amd64 wheel，
+# 声明必需环境后 uv 才会锁定带 Windows 轮子的版本（见 rules/09）。
+required-environments = [
+    "sys_platform == 'win32' and platform_machine == 'AMD64'",
 ]
 
 [tool.hatch.build.targets.wheel]
