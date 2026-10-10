@@ -2,17 +2,21 @@
 
 输入命令后回车，示例会把请求发给设备并把回包打印出来：
 
-===============  ==========================================================
-命令             说明
-===============  ==========================================================
-``Version``      单发单收
-``ReadAll``      单发多收（设备连回三帧）
-``monitor``      让设备开始流式吐帧，输入 ``stop`` 结束
-``alarm``        让设备主动上报一条报警
-``raw Ping``     发送未注册的原始文本；设备的回包会作为未识别帧上报
-``help``         打印这张表
-``quit``         断开并退出
-===============  ==========================================================
+===================  ========================================================
+命令                 说明
+===================  ========================================================
+``Version``          单发单收
+``ReadAll``          单发多收（``count=3``）
+``Dump``             单发多收（``until=END``，行数由设备状态决定）
+``monitor``          让设备持续吐帧，发 ``stop`` 或 ``status`` 结束
+``stop``             停止采集（NO_REPLY，用 URGENT 抢发）
+``status``           查设备状态；设备收到任何请求都会先停掉采集
+``report``           开关周期上报：设备每 100 ms 主动推一条温度，超温再报警
+``gain <n>``         设置增益：1..8 成功，其余回设备错误
+``raw Ping``         发送未注册的原始文本；回包会作为未识别帧上报
+``help``             打印这张表
+``quit``             断开并退出
+===================  ========================================================
 
 虚拟设备与它完整指令集见 ``examples/virtual_device.py``。
 运行：``uv run python examples/interactive.py``
@@ -34,8 +38,15 @@ if __package__ in {None, ""}:
 
 from examples.virtual_device import (
     ALARM,
+    DUMP,
     MONITOR,
+    READ_ALL,
+    REPORT,
+    REPORT_FAST_MS,
+    SET_GAIN,
+    STATUS,
     STOP,
+    TELEMETRY,
     VERSION,
     Alarm,
     VirtualDevice,
@@ -55,37 +66,45 @@ class InteractiveConsole:
     """把设备当成一个可以用命令行对话的对象。"""
 
     PROMPT = "serialforge> "
-    # 每次输入之后泵事件的时间：太短看不到流式帧，太长会让手感变差。
+    # 普通命令泵事件的时间：太短看不到回包，太长会让手感变差。
     PUMP_S = 0.3
+    # 周期上报要等设备自己攒出超温，多泵一会儿才能看到报警。
+    REPORT_PUMP_S = 0.9
+    # 流式调用的本地期限：默认 3 秒会把采集掐断，示例显式放大。
+    STREAM_TIMEOUT_S = 60.0
     HELP = (
         "  Version    单发单收\n"
-        "  ReadAll    单发多收（三帧）\n"
-        "  monitor    开始流式输出；流式期间普通命令会得到 BUSY，先 stop\n"
-        "  stop       停止流式输出\n"
-        "  alarm      让设备主动上报一条报警\n"
+        "  ReadAll    单发多收（count=3）\n"
+        "  Dump       单发多收（until=END）\n"
+        "  monitor    开始采集；设备持续吐帧，发 stop 或 status 结束\n"
+        "  stop       停止采集（无回复）\n"
+        "  status     查设备状态；任何请求都会先停掉采集\n"
+        "  report     开关周期上报（设备每 100 ms 自己推温度）\n"
+        "  gain <n>   设置增益：1..8 成功，其余回设备错误\n"
         "  raw Ping   发送未注册的原始文本（回包按未识别帧上报）\n"
         "  help       显示本帮助\n"
         "  quit       断开并退出"
     )
 
     def __init__(self) -> None:
-        """准备 Qt 应用、虚拟设备、handler 与信号槽。"""
+        """准备 Qt 应用、虚拟设备、门面与信号槽。"""
         self._application = QCoreApplication.instance() or QCoreApplication([])
         self._device = VirtualDevice()
-        self._handler = SerialForge(self._build_profile())
-        # 正在跑的流式命令：需要留着 ticket 才能在 stop 时取消它。
+        self._forge = SerialForge(self._build_profile())
+        # 正在跑的采集：需要留着 ticket 才能在停流时取消它。
         self._monitor_ticket: CommandTicket | None = None
+        self._is_reporting: bool = False
         for declaration in self._device.declarations():
-            self._handler.add(declaration)
+            self._forge.add(declaration)
         # 接收全部放在槽里：结果、事件（含未识别帧）都从信号来。
-        self._handler.received.connect(
+        self._forge.received.connect(
             lambda message: (
                 self._on_result(message)
                 if message.category is MessageCategory.COMMAND_RESULT
                 else None
             )
         )
-        self._handler.received.connect(
+        self._forge.received.connect(
             lambda message: (
                 self._on_event(message)
                 if message.category
@@ -109,11 +128,11 @@ class InteractiveConsole:
 
     def run(self) -> int:
         """连上设备，然后进入读取输入的主循环。"""
-        with self._device.use():
+        with self._device.attached():
             try:
                 # 阻塞式连接：返回时设备已就绪；失败同步抛 SerialForgeError。
-                self._handler.connect()
-                print(f"已连接虚拟设备（{self._handler.state.value}）")
+                self._forge.connect()
+                print(f"已连接虚拟设备（{self._forge.state.value}）")
                 print("可用命令：")
                 print(self.HELP)
                 while self._read_once():
@@ -123,7 +142,7 @@ class InteractiveConsole:
                 return 1
             finally:
                 # 无论正常退出还是 EOF/Ctrl+C，都要断开，避免 I/O 线程悬挂。
-                self._handler.disconnect()
+                self._forge.disconnect()
         print("已断开连接")
         return 0
 
@@ -137,58 +156,110 @@ class InteractiveConsole:
             return False
         if text in {"quit", "exit"}:
             return False
-        self._dispatch(text)
-        self._pump(self.PUMP_S)
+        self._pump(self._dispatch(text))
         return True
 
-    def _dispatch(self, text: str) -> None:
-        """把一行输入翻译成库调用。"""
+    def _dispatch(self, text: str) -> float:
+        """把一行输入翻译成库调用，返回这一条要泵多久事件。"""
         if not text:
+            return 0.0
+        word, _, argument = text.partition(" ")
+        match word.lower():
+            case "help":
+                print(self.HELP)
+            case "monitor":
+                self._start_monitor()
+            case "stop":
+                self._stop_monitor()
+            case "status":
+                self._ask_status()
+            case "report":
+                return self._toggle_report()
+            case "gain":
+                self._send_gain(argument)
+            case "dump":
+                self._forge.send_async(DUMP)
+            case "readall":
+                self._forge.send_async(READ_ALL)
+            case "version":
+                self._forge.send_async(VERSION)
+            case "raw":
+                print(f"  发送原始文本: {argument!r}")
+                self._forge.send_async(argument)
+            case _:
+                # 已注册命令的名字（或任意文本）都交给 send_async()：
+                # 库先按声明匹配，匹配不到时按原始文本发送（route=RAW）。
+                self._forge.send_async(text)
+        return self.PUMP_S
+
+    def _start_monitor(self) -> None:
+        """开始采集：设备持续吐帧，直到下一条请求打断它。"""
+        if self._monitor_ticket is not None:
+            print("  采集已经在跑了")
             return
-        if text == "help":
-            print(self.HELP)
-        elif text == "monitor":
-            # 流式命令不会自己结束，需要 stop 或 cancel 才能收尾。
-            self._monitor_ticket = self._handler.send_async(MONITOR)
-            print("  已开始流式输出，输入 stop 结束")
-        elif text == "stop":
-            self._stop_monitor()
-        elif text == "alarm":
-            self._device.inject_alarm()
-            print("  已让设备主动上报一帧报警")
-        elif text.startswith("raw "):
-            raw_text = text[4:]
-            print(f"  发送原始文本: {raw_text!r}")
-            self._handler.send_async(raw_text)
-        else:
-            # 已注册命令的名字（或任意文本）都交给 send()：库先按声明匹配，
-            # 匹配不到时按原始文本发送（route=RAW）。
-            self._handler.send_async(text)
+        # 流的存活期限来自这一次调用：默认 3 秒会把采集掐断。
+        self._monitor_ticket = self._forge.send_async(
+            MONITOR, timeout_s=self.STREAM_TIMEOUT_S
+        )
+        print("  已开始采集；发 stop 或 status 结束")
 
     def _stop_monitor(self) -> None:
-        """停止流式输出：先抢发停止命令，再取消流式 ticket。"""
+        """停止采集：抢发停止命令；本地调用等它的结果回来再收尾。"""
         if self._monitor_ticket is None:
-            print("  当前没有在跑的流式命令")
+            print("  当前没有在跑的采集")
             return
         # URGENT 优先级让停止命令插到队列前面，不用等普通命令发完。
-        self._handler.send_async(STOP, priority=CommandPriority.URGENT)
-        # cancel() 只影响本地队列：已经写出去的帧照旧会到达。
+        self._forge.send_async(STOP, priority=CommandPriority.URGENT)
+        print("  已请求停止采集")
+
+    def _ask_status(self) -> None:
+        """查设备状态：设备收到任何请求都会先停流，所以它也能打断采集。"""
+        self._forge.send_async(STATUS)
+
+    def _toggle_report(self) -> float:
+        """开关周期上报：设备每 100 ms 主动推一条 TEMP，超温再补 ALARM。"""
+        self._is_reporting = not self._is_reporting
+        period_ms = REPORT_FAST_MS if self._is_reporting else 0
+        self._forge.send_async(REPORT, params={"period_ms": period_ms})
+        if not self._is_reporting:
+            print("  已关闭周期上报")
+            return self.PUMP_S
+        print(f"  已开启周期上报（每 {period_ms} ms 一条），等它自己报警")
+        return self.REPORT_PUMP_S
+
+    def _send_gain(self, argument: str) -> None:
+        """设置增益：1..8 成功，越界时设备回错误帧。"""
+        self._forge.send_async(SET_GAIN, params={"value": argument or "0"})
+
+    def _finish_monitor(self) -> None:
+        """结束本地流式调用；设备端由它收到的下一条请求停流。"""
+        if self._monitor_ticket is None:
+            return
+        # cancel() 只影响本地调用：已经写出去的帧照旧会到达。
         self._monitor_ticket.cancel()
         self._monitor_ticket = None
-        print("  已请求停止流式输出")
 
     def _on_result(self, result: Message[Any]) -> None:
         """命令终态槽：status 说明成败，data 是解析结果。"""
         name = "原始文本" if result.spec is None else result.spec.name
-        print(f"  [结果] {name} 状态={result.status.value} 数据={result.data}")
+        detail = f" 错误={result.error_message}" if result.error_message else ""
+        print(
+            f"  [结果] {name} 状态={result.status.value} "
+            f"数据={result.data}{detail}"
+        )
+        if result.spec is STOP or result.spec is STATUS:
+            # 设备因为收到这条命令而停流，本地流式调用跟着收尾。
+            self._finish_monitor()
 
     def _on_event(self, event: Message[Any]) -> None:
         """事件槽：流式帧、主动上报、以及没匹配上的回包都在这里。"""
         if event.spec is MONITOR:
             print(f"  [流] {event.data}")
+        elif event.spec is TELEMETRY:
+            print(f"  [上报] {event.data}")
         elif event.spec is ALARM:
             assert isinstance(event.data, Alarm)
-            print(f"  [上报] 报警 {event.data.code}")
+            print(f"  [报警] 报警码 {event.data.code}")
         else:
             print(f"  [未识别帧] {event.raw_frame!r}")
 

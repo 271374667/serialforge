@@ -1,9 +1,9 @@
 """快速启动：一个文件看完全部“从设备拿信息”的方式（无硬件）。
 
-本示例只写 serialforge 的事：建 Qt 应用、拼 ``DeviceProfile``、注册声明、
-连接、发指令、收信号。虚拟设备与它的指令集（Version / ReadAll / Monitor /
-Stop / Reboot / Ping / ALARM）见 ``examples/virtual_device.py``；真机上换成
-``handler.connect("COM11")`` 即可。
+本示例只写 serialforge 的事：建 Qt 应用、拼 ``DeviceProfile``、用门面声明命令、
+连接、发指令、收信号。虚拟设备与它的指令集（Version / Hello / ReadAll /
+Dump / Monitor / Stop / Report / SetGain / Status / TEMP / ALARM）见
+``examples/virtual_device.py``；真机换成 ``forge.connect("COM11")`` 即可。
 
 覆盖的五种取信息方式：
 
@@ -13,9 +13,9 @@ Stop / Reboot / Ping / ALARM）见 ``examples/virtual_device.py``；真机上换
 4. 主动上报（Spec）：设备没被问也会推数据
 5. 无回复（NO_REPLY）：写完就结束，不等回复
 
-``connect()`` 是阻塞的：返回时设备已经就绪，可以直接 ``send()``。示例里手动泵
-事件只是为了收结果和事件信号——它们由 I/O 工作线程发出，槽在主线程，需要转
-一次事件循环才会被调用。
+``connect()`` 是阻塞的：返回时设备已经就绪，可以直接发命令。示例里手动泵事件
+只是为了收结果和事件信号——它们由 I/O 工作线程发出，槽在主线程，需要转一次
+事件循环才会被调用。
 
 运行：``uv run python examples/quick_start.py``
 """
@@ -34,20 +34,23 @@ if __package__ in {None, ""}:
 
 from examples.virtual_device import (
     ALARM,
+    DUMP,
     MONITOR,
     READ_ALL,
-    REBOOT,
+    REPORT,
+    REPORT_FAST_MS,
     STOP,
+    TELEMETRY,
     VERSION,
     VirtualDevice,
 )
 from serialforge import (
-    CommandSpec,
     DeviceProfile,
     Message,
     MessageCategory,
     SerialForge,
     SerialForgeError,
+    Spec,
 )
 from serialforge.advanced import CommandPriority, SerialConfig
 from serialforge.qt_core import QCoreApplication
@@ -57,26 +60,26 @@ class QuickStartDemo:
     """按顺序演示五种取信息方式，全部逻辑都收在这个类里。"""
 
     def __init__(self) -> None:
-        """准备 Qt 应用、虚拟设备、handler 与信号收集容器。"""
+        """准备 Qt 应用、虚拟设备、门面与信号收集容器。"""
         # SerialForge 构造时就会检查 Qt 应用是否存在，所以先建它。
         self._application = QCoreApplication.instance() or QCoreApplication([])
         # 虚拟设备的指令集见 examples/virtual_device.py 顶部的表格。
         self._device = VirtualDevice()
-        self._handler = SerialForge(self._build_profile())
+        self._forge = SerialForge(self._build_profile())
         self._results: list[Message[Any]] = []
         self._events: list[Message[Any]] = []
         # 命令必须先注册再发送，而且要用同一份声明对象（库不复制声明）。
         for declaration in self._device.declarations():
-            self._handler.add(declaration)
+            self._forge.add(declaration)
         # 结果和事件都只从信号回来，这里先收进列表，方便下面顺序演示。
-        self._handler.received.connect(
+        self._forge.received.connect(
             lambda message: (
                 self._results.append(message)
                 if message.category is MessageCategory.COMMAND_RESULT
                 else None
             )
         )
-        self._handler.received.connect(
+        self._forge.received.connect(
             lambda message: (
                 self._events.append(message)
                 if message.category
@@ -102,12 +105,12 @@ class QuickStartDemo:
 
     def run(self) -> int:
         """连上设备，依次演示五种取信息方式，返回进程退出码。"""
-        with self._device.use():
+        with self._device.attached():
             try:
                 # 阻塞式连接：返回时设备已经打开并初始化好，可以直接发送。
                 # 失败（没找到设备、端口被占用等）会同步抛 SerialForgeError。
-                self._handler.connect()
-                print(f"[连接] {self._handler.state.value}")
+                self._forge.connect()
+                print(f"[连接] {self._forge.state.value}")
                 self._demo_single()
                 self._demo_multi()
                 self._demo_stream()
@@ -118,7 +121,7 @@ class QuickStartDemo:
                 return 1
             finally:
                 # 退出前断开：它会等 I/O 线程停下来，避免解释器结束时线程悬挂。
-                self._handler.disconnect()
+                self._forge.disconnect()
         print("\n[完成] 五种取信息方式都跑过了")
         return 0
 
@@ -126,31 +129,38 @@ class QuickStartDemo:
         """1. 单发单收：一条请求对应一条回复。"""
         print("\n=== 1. 单发单收（SINGLE）===")
         self._results.clear()
-        self._handler.send_async(VERSION)
+        self._forge.send_async(VERSION)
         result = self._wait_result(VERSION)
         print(f"  请求文本: {VERSION.request!r}")
         print(f"  解析结果: {result.data}  原始帧: {result.raw_frames[0]!r}")
 
     def _demo_multi(self) -> None:
         """2. 单发多收：MULTI 把多帧收进一个结果里。"""
-        print("\n=== 2. 单发多收（MULTI，count=3）===")
+        print("\n=== 2. 单发多收（MULTI）===")
         self._results.clear()
-        self._handler.send_async(READ_ALL)
+        # 定数收尾：count=3 收到第三帧就结束。
+        self._forge.send_async(READ_ALL)
         result = self._wait_result(READ_ALL)
         # 没指定 result_type 时，每帧解析成一个 dict，整体是 list。
         assert isinstance(result.data, list)
         for index, frame in enumerate(result.data, start=1):
-            print(f"  第 {index} 帧: {frame}")
-        print(f"  帧数: {len(result.raw_frames)}")
+            print(f"  count=3 第 {index} 帧: {frame}")
+        # 定界收尾：行数由设备状态决定，所以用 until="END" 收尾。
+        self._forge.send_async(DUMP)
+        dumped = self._wait_result(DUMP)
+        assert isinstance(dumped.data, list)
+        print(f"  until=END 收到 {len(dumped.data)} 行样本")
+        print(f"  最后一帧: {dumped.raw_frames[-1]!r}")
 
     def _demo_stream(self) -> None:
         """3. 流式输出：STREAM 的帧只走 received。"""
         print("\n=== 3. 流式输出（STREAM）===")
         self._events.clear()
-        ticket = self._handler.send_async(MONITOR)
+        # 流的存活期限来自这一次调用：默认 3 秒会把长一点的采集掐断。
+        ticket = self._forge.send_async(MONITOR, timeout_s=60.0)
         self._wait_until(lambda: len(self._frames_of(MONITOR)) >= 3)
         # 停止命令要插到普通命令前面，所以用 URGENT 优先级。
-        self._handler.send_async(STOP, priority=CommandPriority.URGENT)
+        self._forge.send_async(STOP, priority=CommandPriority.URGENT)
         self._wait_result(STOP)
         # cancel() 让流式命令自身也有明确的终态（CANCELLED），否则它会一直挂着。
         ticket.cancel()
@@ -160,30 +170,34 @@ class QuickStartDemo:
         print(f"  流式命令终态: {final.status.value}")
 
     def _demo_event(self) -> None:
-        """4. 主动上报：设备没被问也会推数据。"""
-        print("\n=== 4. 主动上报（Spec）===")
+        """4. 主动上报：设备到点自己推数据，没人问它。"""
+        print("\n=== 4. 主动上报（设备自己发的事件）===")
         self._events.clear()
-        # 真机由设备自己推；这里让虚拟设备注入一帧 ALARM 42。
-        self._device.inject_alarm()
+        # Report 100：让设备每 100 毫秒推一条 TEMP；它自己判断超温再补 ALARM。
+        self._forge.send_async(REPORT, params={"period_ms": REPORT_FAST_MS})
+        self._wait_result(REPORT)
         self._wait_until(lambda: bool(self._frames_of(ALARM)))
-        event = self._frames_of(ALARM)[0]
-        print(f"  事件: {event.data}  原始帧: {event.raw_frame!r}")
+        for event in self._frames_of(TELEMETRY)[:3]:
+            print(f"  上报: {event.data}  原始帧: {event.raw_frame!r}")
+        alarm = self._frames_of(ALARM)[0]
+        print(f"  报警: {alarm.data}  原始帧: {alarm.raw_frame!r}")
         print("  提示：没注册的帧也会进 received，此时 spec 为 None")
 
     def _demo_no_reply(self) -> None:
         """5. 无回复：写完立即结束，不等设备回答。"""
         print("\n=== 5. 无回复（NO_REPLY）===")
         self._results.clear()
-        self._handler.send_async(REBOOT)
-        result = self._wait_result(REBOOT)
+        # Report 0 关掉刚才打开的上报；无回复指令写完就算成功。
+        self._forge.send_async(REPORT, params={"period_ms": 0})
+        result = self._wait_result(REPORT)
         print(f"  终态: {result.status.value}  数据: {result.data}")
         print(f"  已写出字节: {result.sent!r}")
 
-    def _frames_of(self, spec: object) -> list[Message[Any]]:
+    def _frames_of(self, spec: Spec[Any]) -> list[Message[Any]]:
         """按对象身份筛事件：库不复制声明，所以 ``is`` 才可靠。"""
         return [event for event in self._events if event.spec is spec]
 
-    def _wait_result(self, spec: CommandSpec) -> Message[Any]:
+    def _wait_result(self, spec: Spec[Any]) -> Message[Any]:
         """等到某个声明的终态结果并返回它。"""
         self._wait_until(
             lambda: any(item.spec is spec for item in self._results)

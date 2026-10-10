@@ -21,9 +21,23 @@ EXAMPLES = ROOT / "examples"
 DOCS = ROOT / "docs"
 INCLUDE = re.compile(r'^--8<--\s+"([^"]+)"\s*$', re.MULTILINE)
 
-# 交互示例的输入脚本：覆盖单发单收、单发多收、流式、主动上报、原始文本和退出。
+# 交互示例的输入脚本：覆盖单发单收、两种多收、流式、两种打断、上报、错误与退出。
 INTERACTIVE_INPUT = (
-    "Version\nReadAll\nmonitor\nVersion\nstop\nalarm\nraw Ping\nhelp\nquit\n"
+    "Version\n"
+    "ReadAll\n"
+    "Dump\n"
+    "monitor\n"
+    "ReadAll\n"
+    "stop\n"
+    "monitor\n"
+    "status\n"
+    "report\n"
+    "report\n"
+    "gain 5\n"
+    "gain 99\n"
+    "raw Ping\n"
+    "help\n"
+    "quit\n"
 )
 
 
@@ -43,7 +57,9 @@ def run_example(
     )
 
 
-@pytest.mark.parametrize("name", ["quick_start.py", "auto_connect.py"])
+@pytest.mark.parametrize(
+    "name", ["quick_start.py", "auto_connect.py", "async_callbacks.py"]
+)
 def test_examples_run_without_hardware(name: str) -> None:
     """Keep every no-hardware example executable as a standalone script."""
     completed = run_example(name)
@@ -60,7 +76,10 @@ def test_interactive_example_answers_every_command() -> None:
     assert "状态=ok" in completed.stdout
     assert "状态=busy" in completed.stdout
     assert "状态=cancelled" in completed.stdout
+    assert "状态=device_error" in completed.stdout
+    assert "[流]" in completed.stdout
     assert "[上报]" in completed.stdout
+    assert "[报警]" in completed.stdout
     assert "[未识别帧]" in completed.stdout
 
 
