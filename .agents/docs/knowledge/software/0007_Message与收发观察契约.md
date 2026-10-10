@@ -36,25 +36,21 @@ class Message(Generic[T]):
 | category | spec/request_id/context | 有效载荷 | 用途 |
 | --- | --- | --- | --- |
 | RAW_RECEIVE | None / "" / 空映射 | LINE 的非空完整行，保留接收结束符；非行模式为非空 read 字节 | 滚动 RX 原始日志，解析观察前发出 |
-| RESPONSE_FRAME | 对应命令/ID/context | 单个匹配帧和解析值 | MULTI 中间帧等按帧观察 |
-| COMMAND_RESULT | 原命令或 RAW 的 None / 调用 ID / context | SINGLE 单值、MULTI 列表或无回复 None | 同步返回、异步回调、统一终态观察 |
-| DEVICE_EVENT | 原事件 / "" / 空映射 | 单帧解析值 | 主动上报 |
-| STREAM_FRAME | 原 STREAM 命令 / 调用 ID / context | 当前流帧 | 持续数据 |
-| UNKNOWN_FRAME | None / "" / 空映射 | 帧解码原文 | 未匹配的完整帧 |
+| RESPONSE_FRAME | 对应命令/ID/context | 单个匹配帧和解析值 | 内部解析；raw_data 为空不通过 received 发布 |
+| COMMAND_RESULT | 原命令或 RAW 的 None / 调用 ID / context | SINGLE 单值、MULTI 列表或无回复 None | 同步返回、调用句柄、异步完成回调 |
+| DEVICE_EVENT | 原事件 / "" / 空映射 | 单帧解析值 | 内部解析；raw_data 为空不通过 received 发布 |
+| STREAM_FRAME | 原 STREAM 命令 / 调用 ID / context | 当前流帧 | 内部解析；raw_data 为空不通过 received 发布 |
+| UNKNOWN_FRAME | None / "" / 空映射 | 帧解码原文 | 内部解析；raw_data 为空不通过 received 发布 |
 
 用户 2026-10-10 要求 received 过滤空内容并按完整行发出，覆盖此前 RAW_RECEIVE 逐 read 转发的约定。LINE 模式先缓存分片，遇到接收结束符后逐行发布 RAW_RECEIVE，保留原结束符；空 read 和只有结束符的空行不发布，未完成的行继续等待。接收结束符取显式 FramingConfig.terminator，否则取 profile.terminator 按 encoding 编码，独立于发送定界配置。
 
-并行探测按读取线程隔离缓存，切换探测端口/波特率、扫描收尾、重新配置、断开及重连时清理半行，避免旧数据混入新会话；LINE 缓存受 FramingConfig 的大小限制，超限通过 check_errors 读取。显式非行模式（SILENCE_GAP/DELIMITED/LENGTH_PREFIX）继续逐非空 read 发布，避免无结束符协议无法观察。命令终态通知仍保留；其他类别的 raw_data 默认 b''，日志仍应只筛选 RAW_RECEIVE。解析类别和终态可能与同一批原字节有关，业务筛选其他类别，避免重复显示原数据。
+并行探测按读取线程隔离缓存，切换探测端口/波特率、扫描收尾、重新配置、断开及重连时清理半行，避免旧数据混入新会话；LINE 缓存受 FramingConfig 的大小限制，超限通过 check_errors 读取。显式非行模式（SILENCE_GAP/DELIMITED/LENGTH_PREFIX）继续逐非空 read 发布，避免无结束符协议无法观察。
 
-COMMAND_RESULT 即使无设备回复也可能产生，例如 NO_REPLY 写入成功、TIMEOUT/CANCELLED。received 合并了原 command_finished 的终态语义，因此不是每条 received 都来自物理 RX；category 明确区分它们。失败消息是终态观察数据，不替代 result()/send_sync 的异常处理。
+COMMAND_RESULT 即使无设备回复也可能产生，例如 NO_REPLY 写入成功、TIMEOUT/CANCELLED。这些结果仍由调用句柄保存，成功通过 add_done_callback 获取，同步通过 send_sync/result 获取，失败仍按异常契约处理；不因为 received 过滤而丢失命令结果状态或改变对象身份。
 
-2026-10-10 补充：统一发布出口过滤非 COMMAND_RESULT 且 raw_data 与所有 raw_frames 均空的消息，避免定界空行又以空解析帧发布。COMMAND_RESULT 仍保留终态语义及对象身份。只打印原始 RX 时先判断 raw_data 非空；解析帧与结果消息的 raw_data 默认 b''，直接打印每条消息的该字段会造成“仍收到空字符串”的错觉，不能为此丢弃合法结果或 STREAM 数据。
+2026-10-10 用户进一步明确：非空过滤必须由库保证，不能修改使用方 demo 或要求消费端过滤。统一发布出口对所有 category 一律执行 `if not message.raw_data: return`，空数据不入公共信号队列，不为 COMMAND_RESULT 或非空 raw_frames 设置例外。因此 received 当前仅发布带真实原始字节的 RAW_RECEIVE；响应帧、事件、流帧及终态元信息的 raw_data 为空，不再通过 received 发出。STREAM 原始数据仍按接收定界发布，命令结果通过调用对象/回调/同步返回获取。
 
-```python
-def receive(message: Message[object]) -> None:
-    if message.raw_data:
-        print("Received:", message.raw_data)
-```
+收到的每条 received 都能直接打印 raw_data，无需后处理过滤。用户 temp/0005真机测试/U987demo1.py 恢复原样，用原打印函数连接信号即可观察非空完整行。
 
 params/context 只读，业务 data 不承诺递归不可变。Message 的对象字段可以 None，值字段保持字符串/枚举/数值/集合类型。
 
@@ -69,7 +65,7 @@ class SerialForge(QObject):
     raw_sent = Signal(bytes)                   # 实际写入串口的原始字节
 ```
 
-- received 合并原 command_finished/event_received，并加入 RAW_RECEIVE 原字节观察。COMMAND_RESULT 每次调用恰一次；RESPONSE_FRAME/事件/流帧按解析语义发布；RAW_RECEIVE 在 LINE 模式每条非空完整行一次，其他模式每次非空后台 read 一次。
+- received 一律只发非空 raw_data。LINE 模式每条非空完整行一次，其他模式每次非空 read 一次；解析及终态元信息不因其 raw_frames/data 非空而绕过过滤。命令终态仍恰一次保存在调用对象中，成功回调规则不变。
 - raw_sent 是软件实际发送的 bytes，含编码结果、发送结束符、校验等；在后端确认接受字节后发，不在排队时发。部分写入只发送实际已接受的前缀，再抛写入异常；无法确定驱动是否接受时不伪造成功发送。
 - 所有扫描探测、初始化、心跳、重试、RAW 和业务命令的实际串口写入也纳入 raw_sent。扫描临时端口的数据同样纳入 RAW_RECEIVE；并行扫描下裸 bytes 无端口信息，跨端口归属不保证，若以后需要精确多端口日志须另评审带端口元信息的发送载荷。
 - 门面内部主线程桥接统一派发 received/raw_sent，普通闭包消费也在主线程；信号记录包含观察时间而非保证纳秒级物理线序，多端口并发没有全局物理先后顺序。

@@ -16,7 +16,6 @@ from serialforge import (
     DeviceInfo,
     DeviceProfile,
     Message,
-    MessageCategory,
     SerialForge,
 )
 from serialforge.advanced import FramingConfig, SerialConfig
@@ -70,22 +69,18 @@ def test_real_port_tx_rx_loopback() -> None:
     handler.add(LOOPBACK)
     states: list[ConnectionState] = []
     results: list[Message[Any]] = []
+    received: list[Message[Any]] = []
     handler.connection_state_changed.connect(states.append)
-    handler.received.connect(
-        lambda message: (
-            results.append(message)
-            if message.category is MessageCategory.COMMAND_RESULT
-            else None
-        )
-    )
+    handler.received.connect(received.append)
     handler.connect(DeviceInfo(port=port, baudrate=baudrate))
     try:
         _wait_for(
             application,
             lambda: handler.state is ConnectionState.CONNECTED,
         )
-        handler.send_async(LOOPBACK)
-        _wait_for(application, lambda: len(results) == 1)
+        handler.send_async(LOOPBACK).add_done_callback(results.append)
+        _wait_for(application, lambda: len(results) == 1 and len(received) == 1)
+        assert received[0].raw_data == LOOPBACK_TEXT.encode() + b"\r\n"
         assert results[0].status is CommandStatus.OK
         assert results[0].spec is LOOPBACK
         assert ConnectionState.CONNECTED in states

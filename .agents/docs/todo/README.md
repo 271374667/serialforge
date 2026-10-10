@@ -17,6 +17,7 @@
 | 编号 | 任务 | 优先级 | 关联 checkpoint |
 | --- | --- | --- | --- |
 | 0009 | [0009_重写 examples_virtual_device.py：设备引擎 + 内存挂载](./0009_重写 examples_virtual_device.py：设备引擎 + 内存挂载.md) | 高 | checkpoint/0011_虚拟设备示例重写.md |
+| 0011 | [0011_迁移随库示例到received非空原始数据契约](./0011_迁移随库示例到received非空原始数据契约.md) | 中 | - |
 
 ## 说明
 

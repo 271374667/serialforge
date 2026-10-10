@@ -83,7 +83,7 @@ class SerialForge(QObject):
     main thread. Only QtCore is imported.
 
     Attributes:
-        received: Message for complete raw lines, frames, events and results.
+        received: Message with nonempty raw_data, using complete LINE reads.
         raw_sent: Exact bytes accepted by the serial backend, including probes.
         connection_state_changed: New ConnectionState on the main thread.
     """
@@ -157,17 +157,13 @@ class SerialForge(QObject):
         self._dispatch_requested.emit(action)
 
     def _publish(self, message: Message[Any]) -> None:
-        """Queue nonempty receive data and the exact command result object."""
-        if (
-            message.category is not MessageCategory.COMMAND_RESULT
-            and not message.raw_data
-            and not any(message.raw_frames)
-        ):
+        """Publish only messages carrying nonempty original receive bytes."""
+        if not message.raw_data:
             return
         self._dispatch(lambda: self.received.emit(message))
 
     def _on_result(self, result: CommandResult) -> None:
-        """Share a call's retained result with the received signal."""
+        """Release completed calls and apply the common receive filter."""
         with self._lock:
             call = self._calls.pop(result.request_id or "", None)
         if call is not None:
@@ -225,7 +221,7 @@ class SerialForge(QObject):
             CommandTicket, bytes, Any, float, Mapping[str, object]
         ],
     ) -> None:
-        """Publish every matched response frame before its terminal result."""
+        """Apply the common receive filter to matched response observations."""
         ticket, frame, data, timestamp, params = observation
         assert ticket.spec is None or isinstance(ticket.spec, CommandSpec)
         self._publish(

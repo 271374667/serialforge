@@ -80,7 +80,7 @@ device.send_async(query, timeout_s=3.0).add_done_callback(
 - 在 deadline 到达后新注册闭包无操作并返回自身；失败/取消的调用也不执行新闭包。明显不接受一个位置参数的函数在注册处直接 raise TypeError；可调用对象无法静态取得签名时，执行边界仍验证其实际调用，不能承诺仅靠 inspect 就覆盖所有可调用对象。
 - 以 monotonic 时钟比较，回调执行前再次验证状态和截止时间，Qt 定时器只作唤醒/清理手段。迟到结果不复活过期订阅。
 - 一旦回调已在 deadline 之前开始执行，库不能抢占中断函数；3 秒是启动资格期限，不是执行函数的强制 CPU 时限。
-- STREAM 没有自然完成时刻，仍只允许流帧通过 received 观察；正常流数据不触发 add_done_callback。默认发送总期限仍适用，用户明确传较长 timeout_s；如何主动“成功结束流”属于未来协议能力。
+- STREAM 没有自然完成时刻，正常流数据不触发 add_done_callback。用户 2026-10-10 要求 received 统一过滤空 raw_data，因此流数据通过该信号观察的是非空原始字节，空 raw_data 的 STREAM_FRAME 元信息不再发出。默认发送总期限仍适用，用户明确传较长 timeout_s；如何主动“成功结束流”属于未来协议能力。
 
 ### 7.3 明确保证应用主线程
 

@@ -1,7 +1,7 @@
 # serialforge · 架构总览
 
 > 类型: 活文档（原地更新，不编号、不归档）  |  最后更新: 2026-10-10
-> 基线 commit: d395288（received 完整行修订前）  |  适用版本: 0.0.1
+> 基线 commit: 502bde7（received 库侧非空契约修订前）  |  适用版本: 0.0.1
 > 形态: 完整  |  维护: AI 更新（见 `.agents/rules/15_architecture_doc.md`）
 > 读法: 第 1、2、3、6 节为必读区（每次会话读，合计 ≤150 行）；其余按需读
 
@@ -57,7 +57,7 @@
 - 顶层导出按知识索引 0005：当前过渡 19 名字、下一轮收敛最终 11；源码与快照随阶段同步 —— **违反**：接口与验收不同步 —— **生效范围**：顶层导出与 API 测试。
 - 新 Spec 与兼容 CommandSpec/EventSpec 均 frozen=True/eq=False，全链路保留对象身份 —— **违反**：result.spec is X 失效 —— **生效范围**：models、registry、dispatcher、回调/信号。
 - 新门面仅 received/raw_sent/connection_state_changed，不公开 traffic_logged；主线程成功且期限内 add_done_callback，默认发送总期限 3 秒，错误从同步/调用对象读取 —— **违反**：UI 跨线程或接口误导 —— **生效范围**：R2–R5，具体见知识索引 0005；兼容 SerialHandler 也不暴露旧信号。
-- received 的 RAW_RECEIVE 在 LINE 模式逐非空完整行发布并保留接收结束符，过滤空 read/空行；半行按读取线程隔离并在探测切换/断开/重连时清理，非行协议与命令终态保持既有语义 —— **违反**：显示分片、跨会话混入旧数据或无结束符协议无法观察 —— **生效范围**：SerialForge，见知识 0007（2026-10-10 覆盖）。
+- received 所有载荷必须 raw_data 非空，库统一出口无 category 例外；LINE 逐完整行保留接收结束符，空 read/空行/空 raw_data 元信息不触发信号；半行按读取线程隔离并在探测切换/断开/重连时清理，结果仍经同步/调用句柄/回调获取 —— **违反**：空信号、显示分片或跨会话旧数据 —— **生效范围**：SerialForge，见知识 0007（2026-10-10 用户进一步覆盖）。
 - 发送终止符与接收定界相互独立；无结束符回复使用显式正数 `silence_gap_s` 的 `SILENCE_GAP`，接收循环须在无新字节时周期性 `flush()` —— **违反**：半包误判或命令永不完成 —— **生效范围**：advanced、transport、M5 connection、M6 discovery。
 - 定义层不导入实现子包，跨子包优先经 `__init__.py`；既有 connection_worker 重连身份解析直接使用 discovery.port_scanner 是当前例外 —— **违反**：循环依赖和架构守卫失败 —— **生效范围**：`src/serialforge/`。
 - 库内只使用 loguru DEBUG 且默认静默 —— **违反**：宿主应用收到意外输出或等级 —— **生效范围**：diagnostics 与 connection。
@@ -82,6 +82,7 @@
 
 | 日期 | commit | 改了什么 |
 | --- | --- | --- |
+| 2026-10-10 | 本次提交 | 用户明确 received 的非空过滤是库行为：统一出口只发布非空 raw_data，撤回用户 demo 修改，命令结果与回调独立保留 |
 | 2026-10-10 | 本次提交 | received 的 LINE 原始接收改为非空完整行，保留接收结束符；隔离探测分片并清理会话半行，保留非行协议与命令结果通知 |
 | 2026-10-10 | 本次提交 | PyQt5 绑定支持：qt_core 三绑定、pyqt5 extra、pyqt5-qt5 平台锁定、CI 三绑定十二组合通过 |
 | 2026-10-09 | 89a28de | R1–R5 实现完成；八个 Python/Qt 组合各 169 通过、1 硬件跳过；干净双绑定 wheel、最低依赖、静态检查、构建与文档站点均通过；真机仍未验收 |

@@ -175,19 +175,17 @@ def test_add_object_fields_and_atomic_configure(device: SerialForge) -> None:
         device.send_async(spec)
 
 
-def test_sync_response_and_exact_signal_identity(device: SerialForge) -> None:
-    """Return the exact same terminal object later observed on received."""
+def test_sync_result_and_nonempty_receive_signal(device: SerialForge) -> None:
+    """Retain command results while received publishes only actual bytes."""
     observed: list[Message[Any]] = []
     device.received.connect(observed.append)
     spec = device.add("Read", r"VALUE:(?P<value>\d+)")
     result = device.send_sync(spec, context={"widget": "row"})
     assert result.data == "VALUE:42" and result.spec is spec
-    wait(lambda: any(item is result for item in observed))
+    wait(lambda: bool(observed))
     assert result.context == {"widget": "row"}
-    assert len([item for item in observed if item is result]) == 1
-    assert any(
-        item.category is MessageCategory.RESPONSE_FRAME for item in observed
-    )
+    assert all(item is not result for item in observed)
+    assert [item.raw_data for item in observed] == [b"VALUE:42\r\n"]
     assert (
         b"".join(
             item.raw_data
@@ -341,7 +339,7 @@ def test_fragmented_serial_response_emits_one_raw_line(
     device.received.connect(observed.append)
     spec = device.add("SN_INFO_GET", r">SN_INFO_GET=(?P<serial>\w+)")
     result = device.send_sync(spec)
-    wait(lambda: any(item is result for item in observed))
+    wait(lambda: bool(observed))
     assert [
         item.raw_data
         for item in observed
@@ -350,34 +348,50 @@ def test_fragmented_serial_response_emits_one_raw_line(
     assert result.data == ">SN_INFO_GET=B0002B" and result.spec is spec
 
 
-def test_received_skips_empty_frames_and_keeps_command_results(
+def test_received_never_emits_empty_raw_data_and_keeps_callbacks(
     device: SerialForge,
 ) -> None:
-    """Ignore blank lines from the parser without losing command delivery."""
+    """Filter every empty raw_data signal while retaining result callbacks."""
     observed: list[Message[Any]] = []
     callbacks: list[Message[Any]] = []
     device.received.connect(observed.append)
     spec = device.add("BlankRead", r"VALUE:(?P<value>\d+)", int)
     call = device.send_async(spec).add_done_callback(callbacks.append)
-    wait(
-        lambda: (
-            bool(callbacks) and any(item is callbacks[0] for item in observed)
-        )
-    )
+    wait(lambda: bool(callbacks) and bool(observed))
     assert device._core is not None
     device._core._dispatcher.flush_events()
     app().processEvents()
     assert callbacks[0] is call.result() and callbacks[0].data == 42
-    assert [
-        item.raw_data
-        for item in observed
-        if item.category is MessageCategory.RAW_RECEIVE
-    ] == [b"VALUE:42\r\n"]
-    assert all(
-        item.raw_data or any(item.raw_frames)
-        for item in observed
-        if item.category is not MessageCategory.COMMAND_RESULT
+    assert [item.raw_data for item in observed] == [b"VALUE:42\r\n"]
+    assert all(item.raw_data for item in observed)
+    assert callbacks[0] not in observed
+
+
+@pytest.mark.parametrize("no_reply", [True, False])
+def test_received_stays_silent_without_device_bytes(
+    device: SerialForge, no_reply: bool
+) -> None:
+    """Suppress empty terminal observations without changing result access."""
+    observed: list[Message[Any]] = []
+    callbacks: list[Message[Any]] = []
+    device.received.connect(observed.append)
+    spec = (
+        device.add("Stop", mode=ResponseMode.NO_REPLY)
+        if no_reply
+        else device.add("Silent", "NEVER")
     )
+    call = device.send_async(spec, timeout_s=0.05)
+    call.add_done_callback(callbacks.append)
+    wait(lambda: call.done)
+    app().processEvents()
+    if no_reply:
+        wait(lambda: bool(callbacks))
+        assert callbacks[0] is call.result() and callbacks[0].ok
+    else:
+        with pytest.raises(CommandTimeoutError):
+            call.result()
+        assert not callbacks
+    assert not observed
 
 
 def test_callback_main_thread_closure_order_and_late_replay(
@@ -598,24 +612,24 @@ def test_error_queue_and_counter() -> None:
     facade.disconnect()
 
 
-def test_context_is_shared_with_each_response(device: SerialForge) -> None:
-    """Reuse exactly one owned snapshot for handle, frames and terminal
-    result.
-    """
+def test_context_is_shared_with_async_result(device: SerialForge) -> None:
+    """Keep call/callback context without emitting empty-byte metadata."""
     observed: list[Message[Any]] = []
+    callbacks: list[Message[Any]] = []
     device.received.connect(observed.append)
     spec = device.add(
         "Many", r"VALUE:(?P<value>\d+)", dict, mode=ResponseMode.MULTI, count=2
     )
     call = device.send_async(spec, context={"row": 5})
-    wait(
-        lambda: any(
-            item.category is MessageCategory.COMMAND_RESULT for item in observed
-        )
-    )
-    owned = [item for item in observed if item.request_id == call.request_id]
-    assert len(owned) == 3
-    assert all(item.context is call.context for item in owned)
+    call.add_done_callback(callbacks.append)
+    wait(lambda: bool(callbacks))
+    assert callbacks[0] is call.result()
+    assert callbacks[0].context is call.context
+    assert [item.raw_data for item in observed] == [
+        b"VALUE:1\r\n",
+        b"VALUE:2\r\n",
+    ]
+    assert all(item.context == {} for item in observed)
 
 
 def test_invalid_callback_signature_rejected(device: SerialForge) -> None:
