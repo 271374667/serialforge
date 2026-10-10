@@ -9,16 +9,18 @@ import time
 import weakref
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import FrozenInstanceError
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
 from serialforge import (
     Correlation,
     DeviceInfo,
+    DeviceProfile,
     Message,
     MessageCategory,
     ResponseMode,
+    ScanMode,
     SerialForge,
     SerialForgeError,
     SerialHandler,
@@ -38,7 +40,7 @@ from serialforge.errors import (
 )
 from serialforge.protocols import TransportProtocol
 from serialforge.qt_core import QCoreApplication, QThread
-from serialforge.transport import PortRegistry
+from serialforge.transport import BackendSwitch, PortRegistry
 from tests.support import FakeBackend, SimulatedDevice, use_fake_backend
 
 _APP: QCoreApplication | None = None
@@ -674,6 +676,232 @@ def test_pending_and_stream_sync_rejection(device: SerialForge) -> None:
         call.result()
     call.cancel()
     assert call.done and call.exception is not None
+
+
+@pytest.mark.parametrize(
+    "configuration", ["saved", "profile", "spec_fields", "text_fields"]
+)
+def test_scan_closes_connection_before_configuring_and_probing(
+    device: SerialForge,
+    configuration: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Release the current device before scanning and leave it disconnected."""
+    backend = cast(FakeBackend, BackendSwitch.current())
+    old_transports = tuple(backend.transports)
+    core = device._core
+    assert core is not None and core._worker is not None
+    old_worker = core._worker
+    old_reader = old_worker._reader
+    assert old_reader is not None
+    old_profile = device._profile
+    probe = device.add("Probe", "READY")
+    read = device.add("Read", "VALUE:.*")
+    device.set_init_sequence([read])
+    open_transport = backend.open
+    closed_before_probe: list[bool] = []
+
+    def open_after_close(
+        port: str, params: Mapping[str, object]
+    ) -> TransportProtocol:
+        closed_before_probe.append(all(item.closed for item in old_transports))
+        return open_transport(port, params)
+
+    monkeypatch.setattr(backend, "open", open_after_close)
+    profile = DeviceProfile(
+        baudrates=[115200], probe=probe, serial=SerialConfig(settle_time_s=0)
+    )
+    if configuration == "saved":
+        found = device.scan()
+        assert device._profile is old_profile
+    elif configuration == "profile":
+        found = device.scan(profile)
+        assert device._profile is profile
+    elif configuration == "spec_fields":
+        found = device.scan(
+            baudrates=[115200],
+            probe=probe,
+            serial=SerialConfig(settle_time_s=0),
+        )
+        assert device._profile is not None and device._profile.probe is probe
+    else:
+        found = device.scan(
+            baudrates=[115200],
+            probe="Probe",
+            probe_pattern="READY",
+            serial=SerialConfig(settle_time_s=0),
+        )
+    assert [item.port for item in found] == ["FACADE"]
+    assert device.state is ConnectionState.DISCONNECTED
+    assert not old_worker.isRunning() and not old_reader.isRunning()
+    assert closed_before_probe and all(closed_before_probe)
+    assert all(item.closed for item in backend.transports)
+    assert not PortRegistry.is_owned("FACADE")
+    assert device._core is not None and device._core._init_sequence == (read,)
+    device.connect(found[0])
+    assert device.send_sync(read).spec is read
+    assert device.send_sync(read).data == "VALUE:42"
+
+
+def test_scan_cancels_previous_calls_and_callbacks(device: SerialForge) -> None:
+    """Clear old commands, successful callbacks and partial receive lines."""
+    read = device.add("Read", "VALUE:.*")
+    silent = device.add("Silent", "NEVER", timeout_s=2)
+    callbacks: list[Message[Any]] = []
+    completed = device.send_async(read).add_done_callback(callbacks.append)
+    assert completed._done_event.wait(0.5)
+    result = completed.result()
+    pending = device.send_async(silent).add_done_callback(callbacks.append)
+    queued = device.send_async(read).add_done_callback(callbacks.append)
+    device._on_raw_receive(b"old partial")
+
+    assert device.scan()
+
+    for call in (pending, queued):
+        with pytest.raises(CommandCancelledError):
+            call.result()
+    assert completed.result() is result
+    assert not device._calls and not device._receive_splitters
+    app().processEvents()
+    assert not callbacks
+
+
+def test_scan_stays_disconnected_without_matching_devices(
+    device: SerialForge,
+) -> None:
+    """Return no matches after releasing the old device and accept a retry."""
+    assert (
+        device.scan(
+            baudrates=[9600],
+            probe="Probe",
+            probe_pattern="READY",
+            probe_timeout_s=0.02,
+            serial=SerialConfig(settle_time_s=0),
+        )
+        == []
+    )
+    assert device.state is ConnectionState.DISCONNECTED
+    assert not PortRegistry.is_owned("FACADE")
+    assert not device._connecting and not device._scanning
+    assert device.scan(
+        baudrates=[115200],
+        probe="Probe",
+        probe_pattern="READY",
+        serial=SerialConfig(settle_time_s=0),
+    )
+
+
+def test_scan_aborts_when_old_connection_cannot_be_stopped(
+    device: SerialForge, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Keep configuration intact and release operation guards on stop errors."""
+    core = device._core
+    assert core is not None
+    old_profile = device._profile
+    backend = cast(FakeBackend, BackendSwitch.current())
+    old_transports = tuple(backend.transports)
+
+    def fail_disconnect() -> None:
+        raise SerialForgeError("connection worker did not stop")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(core, "disconnect", fail_disconnect)
+        with pytest.raises(SerialForgeError, match="did not stop"):
+            device.scan(baudrates=[9600], probe="Probe", probe_pattern="READY")
+    assert device._profile is old_profile
+    assert tuple(backend.transports) == old_transports
+    assert device.state is ConnectionState.CONNECTED
+    assert not device._connecting and not device._scanning
+    assert device.scan()
+
+
+@pytest.mark.parametrize("failure", ["configuration", "probe"])
+def test_scan_failure_leaves_old_device_closed_and_allows_retry(
+    device: SerialForge, failure: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Release operation guards after invalid configuration or probe I/O."""
+    backend = cast(FakeBackend, BackendSwitch.current())
+    old_profile = device._profile
+
+    def fail_open(port: str, params: Mapping[str, object]) -> TransportProtocol:
+        raise OSError("probe transport unavailable")
+
+    with monkeypatch.context() as patch:
+        if failure == "configuration":
+            with pytest.raises(ConfigError):
+                device.scan(baudrates=[], probe="Probe", probe_pattern="READY")
+        else:
+            patch.setattr(backend, "open", fail_open)
+            with pytest.raises(ProbeError):
+                device.scan()
+    assert device._profile is old_profile
+    assert device.state is ConnectionState.DISCONNECTED
+    assert not PortRegistry.is_owned("FACADE")
+    assert all(item.closed for item in backend.transports)
+    assert not device._connecting and not device._scanning
+    assert device.scan()
+
+
+@pytest.mark.parametrize("phase", ["disconnect", "probe"])
+def test_scan_rejects_concurrent_lifecycle_operations(
+    device: SerialForge, phase: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Reserve both connection cleanup and probing without blocking readers."""
+    entered = threading.Event()
+    release = threading.Event()
+    failures: list[Exception] = []
+    backend = cast(FakeBackend, BackendSwitch.current())
+    open_transport = backend.open
+    disconnect = device.disconnect
+
+    def pause_disconnect() -> None:
+        entered.set()
+        assert release.wait(3)
+        disconnect()
+
+    def pause_probe(
+        port: str, params: Mapping[str, object]
+    ) -> TransportProtocol:
+        entered.set()
+        assert release.wait(3)
+        return open_transport(port, params)
+
+    if phase == "disconnect":
+        monkeypatch.setattr(device, "disconnect", pause_disconnect)
+    else:
+        monkeypatch.setattr(backend, "open", pause_probe)
+
+    def scan_in_thread() -> None:
+        try:
+            device.scan(mode=ScanMode.FIRST_MATCH)
+        except Exception as error:
+            failures.append(error)
+
+    thread = threading.Thread(target=scan_in_thread)
+    thread.start()
+    try:
+        assert entered.wait(2)
+        with pytest.raises(ConfigError):
+            device.scan()
+        with pytest.raises(ConfigError):
+            device.scan(
+                baudrates=[115200], probe="Probe", probe_pattern="READY"
+            )
+        with pytest.raises(ConfigError):
+            device.connect("FACADE")
+        with pytest.raises(ConfigError):
+            device.configure(
+                baudrates=[115200], probe="Probe", probe_pattern="READY"
+            )
+        if phase == "probe":
+            device.cancel_scan()
+    finally:
+        release.set()
+        thread.join(5)
+    assert not thread.is_alive() and not failures
+    assert device.state is ConnectionState.DISCONNECTED
+    assert not device._scanning and not device._connecting
+    assert all(item.closed for item in backend.transports)
 
 
 def test_scan_returns_results_and_observes_probe_bytes() -> None:

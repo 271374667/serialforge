@@ -91,15 +91,17 @@ def scan(self, *, baudrates: Sequence[int], probe: str,
               runtime: RuntimeConfig | None = None,
               mode: ScanMode = ScanMode.ALL,
               port: str = "") -> list[DeviceInfo]:
-    """保存完整配置并阻塞扫描；返回前回收所有临时探测句柄。"""
+    """先断开当前设备、保存可选配置并阻塞扫描；返回前回收临时探测句柄。"""
 
 def cancel_scan(self) -> None:
     """线程安全地请求取消扫描；当前无扫描时无操作。"""
 ```
 
-无配置参数使用保存策略；提供 Profile 或字段的形式先 configure 再扫描，后续 connect 直接复用。无匹配返回 []，配置仍保留；扫描不自动连接。重复/并发扫描抛 ProbeError，基础设施故障直接抛 ProbeError，不全部吞成“无设备”。取消返回已完成的匹配，只通过函数返回值交付，不发完成信号。
+用户 2026-10-10 明确覆盖原扫描限制：每次 scan 先完整 disconnect 当前设备，取消旧调用/回调、回收串口线程和句柄、清空接收分片，再应用可选配置并开始探测。无配置参数使用保存策略；提供 Profile 或字段的形式在断开后 configure 再扫描，后续 connect 直接复用。旧连接回收失败时直接抛错，不替换配置或开始探测。
 
-ALL 查全部，FIRST_MATCH 协作取消并回收后至多返回一个。不同端口并行，同端口波特率串行。指定 port 绕过 USB 过滤但仍探测。连接活跃时拒绝 scan，避免扫描自己占用的端口。
+无匹配返回 []，配置仍保留；扫描不自动连接，也不恢复旧连接，成功、无匹配、取消或探测失败后都保持断开。准备阶段和探测阶段均拒绝同门面的并发 scan/connect/configure；门面重复/并发扫描或已有 connect 未结束时抛 ConfigError，基础设施故障抛 ProbeError，不全部吞成“无设备”。取消返回已完成的匹配，只通过函数返回值交付，不发完成信号。
+
+ALL 查全部，FIRST_MATCH 协作取消并回收后至多返回一个。不同端口并行，同端口波特率串行。指定 port 绕过 USB 过滤但仍探测。旧连接释放串口所有权后才枚举端口，因此原连接设备也能再次被扫描发现。独立 configure 仍要求空闲断开，不隐式触发 disconnect。
 
 ### 6.4 连接与关闭
 

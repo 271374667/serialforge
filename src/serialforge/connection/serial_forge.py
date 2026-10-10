@@ -609,13 +609,25 @@ class SerialForge(QObject):
         port: str = "",
         **fields: Any,
     ) -> list[DeviceInfo]:
-        """Scan with saved configuration, a profile object, or plain fields.
+        """Disconnect, apply optional configuration, then scan for devices.
 
         Returns discovered devices and never connects them automatically.
         Run in your own worker for a responsive UI. Raw probe traffic uses the
         same two observation signals; TX bytes do not identify concurrent ports.
         """
         with self._lock:
+            if self._scanning or self._connecting:
+                raise ConfigError("scan or connection is already active")
+            # Reserve lifecycle changes while stopping outside the facade lock.
+            self._connecting = True
+        try:
+            self.disconnect()
+        except BaseException:
+            with self._lock:
+                self._connecting = False
+            raise
+        with self._lock:
+            self._connecting = False
             if profile is not None or fields:
                 if profile is not None:
                     self.configure(profile)
