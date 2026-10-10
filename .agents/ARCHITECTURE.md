@@ -16,7 +16,7 @@
 - 交付物：可构建的 Python 库 `serialforge` 与本地 CI 脚本；无硬件 Demo 放在 `examples/`，测试替身放在 `tests/support/`，不进入发布 wheel。
 - 运行方式：使用方 `from serialforge import ...`；业务命令运行时声明并注册；Qt 应用提供 `QCoreApplication` 事件循环。
 - 关键依赖：Python >=3.11；`pyserial>=3.5`、`loguru>=0.7`；QtCore extras 选择 `PySide6-Essentials>=6.11.2`、`PyQt6>=6.11` 或 `PyQt5>=5.15.11`；uv + hatchling 构建。Qt 下限取本次完整套件通过的保守值，旧版存在 connect 名称冲突。
-- 运行接口遵循知识索引 0005；统一 Spec/Message、主线程期限回调与 SerialForge 门面已接入。qt_core 只导入选定绑定的 QtCore；QtPy 因 QtGui 导入路径不采用，三绑定 Python 3.11–3.14 由 CI 矩阵覆盖，本次已在 3.11 实测三绑定。
+- 运行接口遵循知识索引 0005；统一 Spec/Message、主线程期限回调与 SerialForge 门面已接入。qt_core 只导入选定绑定的 QtCore；QtPy 因 QtGui 导入路径不采用，三绑定 Python 3.11–3.14 十二个组合均已实测通过。
 
 ## 3. 模块地图（必读）
 
@@ -83,7 +83,7 @@
 | 日期 | commit | 改了什么 |
 | --- | --- | --- |
 | 2026-10-10 | 本次提交 | received 的 LINE 原始接收改为非空完整行，保留接收结束符；隔离探测分片并清理会话半行，保留非行协议与命令结果通知 |
-| 2026-10-10 | 本次提交 | PyQt5 绑定支持：qt_core 三绑定、pyqt5 extra、pyqt5-qt5 平台锁定、CI 矩阵扩展 |
+| 2026-10-10 | 本次提交 | PyQt5 绑定支持：qt_core 三绑定、pyqt5 extra、pyqt5-qt5 平台锁定、CI 三绑定十二组合通过 |
 | 2026-10-09 | 89a28de | R1–R5 实现完成；八个 Python/Qt 组合各 169 通过、1 硬件跳过；干净双绑定 wheel、最低依赖、静态检查、构建与文档站点均通过；真机仍未验收 |
 | 2026-10-09 | R1 契约提交 | 固化 SerialForge/Spec/Message、主线程期限回调与收发观察目标；选窄 Qt6 层；源码/依赖不变，22 项基线通过 |
 | 2026-10-08 | 本次提交 | 阻塞连接/发现、移除 find_async、VID/PID 可省略与缓存回退；探测并发/模式保持原设计，125 通过、1 硬件跳过 |

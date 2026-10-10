@@ -47,10 +47,18 @@ extras：`pyside6`→PySide6-Essentials（下限实测 `>=6.11.2`）、`pyqt6`�
 
 ## 已验证范围（2026-10-10）
 
-- 三个绑定在 Python 3.11 各跑完整测试套件：`pyside6`/`pyqt6`/`pyqt5` 均 175 项、
-  0 失败、0 错误；跳过项为未安装绑定与硬件用例。
-- PyQt5 干净 wheel 冒烟（`scripts/ci.py --smoke --binding pyqt5`）：171 通过、4 跳过。
-- PyQt5 在 Python 3.11 与 3.14 均可安装并导入 QtCore（abi3 wheel）。
+阶段 CI `uv run python scripts/ci.py --matrix` 全绿：源检查（ruff check/format、ty、
+pytest、pylint）、构建与 twine、三绑定干净 wheel 冒烟，以及 Python 3.11–3.14 ×
+PySide6/PyQt6/PyQt5 十二个组合（格式为「通过 / 跳过」）：
 
-未验证：Python 3.12/3.13 的 PyQt5 组合、PyQt5 下的真机/硬件用例；完整三绑定 × 四版本矩阵
-（12 组合）本次未全跑，CI 已扩展为覆盖该矩阵。
+| Python | pyside6 | pyqt6 | pyqt5 |
+| --- | --- | --- | --- |
+| 3.11 | 172 / 3 | 173 / 2 | 173 / 2 |
+| 3.12 | 172 / 3 | 173 / 2 | 173 / 2 |
+| 3.13 | 172 / 3 | 173 / 2 | 173 / 2 |
+| 3.14 | 184 / 3 | 185 / 2 | 185 / 2 |
+
+跳过项为未安装绑定与硬件用例；PyQt5 干净 wheel 冒烟单独为 171 通过 / 4 跳过。
+PyQt5 在 Python 3.11 与 3.14 均可安装并导入 QtCore（abi3 wheel）。
+
+未验证：PyQt5（及全部绑定）下的真机/硬件用例。

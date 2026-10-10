@@ -3,15 +3,14 @@
 > 适用版本: 0.0.1 | 公共 API 改造 R1–R5
 
 面向 Windows 10/11 x64、Python 3.11–3.14 的串口通讯库。仅使用 QtCore，
-支持 PySide6 和 PyQt6；导入不会创建应用、线程、串口、文件或日志 sink。
+支持 PySide6、PyQt6 与 PyQt5；导入不会创建应用、线程、串口、文件或日志 sink。
 设备指令由使用方声明，库负责发现、调度、解析、重连和回调。
 
 ```powershell
-uv add "serialforge[pyside6]"  # 或 serialforge[pyqt6]
+uv add "serialforge[pyside6]"  # 或 serialforge[pyqt6] / serialforge[pyqt5]
 ```
 
-同时安装两种绑定时，启动前设置 `QT_API=pyside6` 或 `QT_API=pyqt6`；已加载的
-绑定与设置必须一致。本轮保持 Python 3.11 下限，未加入 Qt5 支持。
+同时安装多个绑定时，启动前设置 `QT_API=pyside6`、`QT_API=pyqt6` 或 `QT_API=pyqt5`；已加载的绑定与设置必须一致。PyQt5/PyQt6 为 Riverbank GPL v3 / 商业双授权，按其条款履行义务；Python 3.11 下限不变。
 
 ## 最小示例
 
