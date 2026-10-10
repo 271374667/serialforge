@@ -105,7 +105,7 @@ ALL 查全部，FIRST_MATCH 协作取消并回收后至多返回一个。不同�
 
 ```python
 def connect(self, target: str | DeviceInfo = "") -> None:
-    """阻塞发现、打开和初始化；成功返回表示可以发送。"""
+    """先关闭旧连接，再阻塞发现、打开和初始化；成功返回表示可以发送。"""
 
 def disconnect(self) -> None:
     """停止并回收 I/O 线程；未完成调用以 CANCELLED 完成；重复调用无操作。"""
@@ -119,6 +119,10 @@ def set_init_sequence(self, items: Sequence[Spec[Any] | str]) -> None:
 ```
 
 target="" 按保存策略发现首个设备；字符串端口绕过身份过滤但仍探测；有 baudrate 的 DeviceInfo 直接打开。失败抛 SerialForgeError，connect 返回值继续 None。另一线程可通过 disconnect 取消未完成连接。
+
+用户 2026-10-10 明确：同一个 SerialForge 实例最多管理一个设备连接。每次 connect 都先执行完整 disconnect，关闭旧串口并等待旧工作线程退出、终止旧日志会话、取消未完成命令和待投递成功回调、清空接收分片，再发起新连接。目标与旧设备相同也必须关闭重新连接，照常重新探测（端口名/自动发现）、打开和执行初始化序列；不作同设备短路。已有声明、配置和初始化序列保留。
+
+旧连接回收失败时直接抛错，不启动新连接；新目标连接失败时保持失败状态，不恢复旧设备，可再次 connect 重试。扫描或另一 connect 尚未结束时仍拒绝并发 connect；自动重连中的旧会话可以由新的 connect 停止并替换。
 
 connect/disconnect 与 QObject 方法名有冲突，暂保留熟悉命名，但必须覆盖此前旧 PySide6 的 connect 名称冲突问题；不能只换 import 就宣布多绑定兼容。
 

@@ -657,13 +657,18 @@ class SerialForge(QObject):
         # ty: ignore[invalid-method-override, missing-override-decorator]
 
     def connect(self, target: str | DeviceInfo = "") -> None:
-        """Block until discovery, open and initialization succeed, or raise."""
+        """Close the previous session, then block until the target is ready.
+
+        Even the same target starts a fresh connection and initialization.
+        Pending calls and callbacks are cancelled before opening the target.
+        """
         with self._lock:
             core = self._require_core()
             if self._scanning or self._connecting:
                 raise ConfigError("scan or connection is already active")
             self._connecting = True
         try:
+            self.disconnect()
             core.connect(target or None)
         finally:
             with self._lock:

@@ -1,7 +1,7 @@
 # serialforge · 架构总览
 
 > 类型: 活文档（原地更新，不编号、不归档）  |  最后更新: 2026-10-10
-> 基线 commit: 502bde7（received 库侧非空契约修订前）  |  适用版本: 0.0.1
+> 基线 commit: 40e56a2（单实例连接替换修订前）  |  适用版本: 0.0.1
 > 形态: 完整  |  维护: AI 更新（见 `.agents/rules/15_architecture_doc.md`）
 > 读法: 第 1、2、3、6 节为必读区（每次会话读，合计 ≤150 行）；其余按需读
 
@@ -54,6 +54,7 @@
 ## 6. 关键不变量（必读，最容易改错的地方）
 
 - 用户 2026-10-08 覆盖 v10 的异步入口与身份必填：connect/find 阻塞，不依赖 Qt 事件泵；VID/PID 可省略，提供时才过滤，指定端口绕过过滤；端口并行、同端口波特率串行，ALL 扫完全部，FIRST_MATCH 协作取消并回收探测句柄 —— **违反**：设备未就绪、资源泄漏或漏检目标 —— **生效范围**：models/connection/discovery/examples。
+- 单个 SerialForge 每次 connect 先完整 disconnect 并回收旧会话，再探测/打开/初始化新目标；同设备也重连，旧回收失败不打开新设备，扫描/并发 connect 仍互斥 —— **违反**：多设备并存、旧调用/回调或分片跨会话污染 —— **生效范围**：SerialForge，见知识 0008（2026-10-10 用户覆盖）。
 - 顶层导出按知识索引 0005：当前过渡 19 名字、下一轮收敛最终 11；源码与快照随阶段同步 —— **违反**：接口与验收不同步 —— **生效范围**：顶层导出与 API 测试。
 - 新 Spec 与兼容 CommandSpec/EventSpec 均 frozen=True/eq=False，全链路保留对象身份 —— **违反**：result.spec is X 失效 —— **生效范围**：models、registry、dispatcher、回调/信号。
 - 新门面仅 received/raw_sent/connection_state_changed，不公开 traffic_logged；主线程成功且期限内 add_done_callback，默认发送总期限 3 秒，错误从同步/调用对象读取 —— **违反**：UI 跨线程或接口误导 —— **生效范围**：R2–R5，具体见知识索引 0005；兼容 SerialHandler 也不暴露旧信号。
@@ -82,6 +83,7 @@
 
 | 日期 | commit | 改了什么 |
 | --- | --- | --- |
+| 2026-10-10 | 本次提交 | SerialForge 每次 connect 先完整关闭旧会话，同设备也重新连接；保留配置/声明/初始化序列，覆盖资源顺序、取消和失败恢复 |
 | 2026-10-10 | 本次提交 | 用户明确 received 的非空过滤是库行为：统一出口只发布非空 raw_data，撤回用户 demo 修改，命令结果与回调独立保留 |
 | 2026-10-10 | 本次提交 | received 的 LINE 原始接收改为非空完整行，保留接收结束符；隔离探测分片并清理会话半行，保留非行协议与命令结果通知 |
 | 2026-10-10 | 本次提交 | PyQt5 绑定支持：qt_core 三绑定、pyqt5 extra、pyqt5-qt5 平台锁定、CI 三绑定十二组合通过 |

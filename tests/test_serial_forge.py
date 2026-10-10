@@ -7,7 +7,7 @@ import sys
 import threading
 import time
 import weakref
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import FrozenInstanceError
 from typing import Any
 
@@ -15,10 +15,12 @@ import pytest
 
 from serialforge import (
     Correlation,
+    DeviceInfo,
     Message,
     MessageCategory,
     ResponseMode,
     SerialForge,
+    SerialForgeError,
     SerialHandler,
     Spec,
 )
@@ -34,7 +36,9 @@ from serialforge.errors import (
     ConfigError,
     ProbeError,
 )
+from serialforge.protocols import TransportProtocol
 from serialforge.qt_core import QCoreApplication, QThread
+from serialforge.transport import PortRegistry
 from tests.support import FakeBackend, SimulatedDevice, use_fake_backend
 
 _APP: QCoreApplication | None = None
@@ -173,6 +177,153 @@ def test_add_object_fields_and_atomic_configure(device: SerialForge) -> None:
     device.remove(spec)
     with pytest.raises(CommandError):
         device.send_async(spec)
+
+
+@pytest.mark.parametrize(
+    ("target", "expected_port"),
+    [
+        ("SECOND", "SECOND"),
+        (DeviceInfo(port="SECOND", baudrate=115200), "SECOND"),
+        ("FIRST", "FIRST"),
+        (DeviceInfo(port="FIRST", baudrate=115200), "FIRST"),
+        ("", "FIRST"),
+    ],
+)
+def test_connect_replaces_session_before_opening_target(
+    target: str | DeviceInfo,
+    expected_port: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Close the old worker before opening even the same device again."""
+    app()
+    devices = [
+        SimulatedDevice(
+            None,
+            None,
+            port=port,
+            baudrate=115200,
+            responses={
+                b"Probe\r\n": b"READY\r\n",
+                b"Init\r\n": b"INIT_OK\r\n",
+                b"Read\r\n": f"VALUE:{port}\r\n".encode(),
+            },
+        )
+        for port in (
+            ["FIRST"] if expected_port == "FIRST" else ["FIRST", "SECOND"]
+        )
+    ]
+    backend = FakeBackend(devices)
+    with use_fake_backend(backend):
+        facade = SerialForge()
+        facade.configure(
+            baudrates=[115200],
+            probe="Probe",
+            probe_pattern="READY",
+            serial=SerialConfig(settle_time_s=0),
+        )
+        init = facade.add("Init", "INIT_OK")
+        read = facade.add("Read", "VALUE:.*")
+        facade.set_init_sequence([init])
+        try:
+            facade.connect(DeviceInfo(port="FIRST", baudrate=115200))
+            core = facade._core
+            assert core is not None and core._worker is not None
+            old_worker = core._worker
+            old_reader = old_worker._reader
+            assert old_reader is not None
+            old_transports = tuple(backend.transports)
+            assert old_transports[-1].write_count == 1
+            app().processEvents()
+            states: list[ConnectionState] = []
+            facade.connection_state_changed.connect(states.append)
+            closed_before_open: list[bool] = []
+            open_transport = backend.open
+
+            def open_after_close(
+                port: str, params: Mapping[str, object]
+            ) -> TransportProtocol:
+                closed_before_open.append(
+                    all(item.closed for item in old_transports)
+                )
+                return open_transport(port, params)
+
+            monkeypatch.setattr(backend, "open", open_after_close)
+            assert facade.connect(target) is None
+            assert facade.state is ConnectionState.CONNECTED
+            assert not old_worker.isRunning() and not old_reader.isRunning()
+            assert closed_before_open and all(closed_before_open)
+            assert all(item.closed for item in old_transports)
+            assert sum(not item.closed for item in backend.transports) == 1
+            assert backend.transports[-1].write_count == 1
+            assert PortRegistry.is_owned(expected_port)
+            if expected_port != "FIRST":
+                assert not PortRegistry.is_owned("FIRST")
+            result = facade.send_sync(read)
+            assert (
+                result.spec is read and result.data == f"VALUE:{expected_port}"
+            )
+            app().processEvents()
+            expected_states = [ConnectionState.DISCONNECTED]
+            if not isinstance(target, DeviceInfo):
+                expected_states.append(ConnectionState.PROBING)
+            expected_states += [
+                ConnectionState.CONNECTING,
+                ConnectionState.CONNECTED,
+            ]
+            assert states == expected_states
+        finally:
+            facade.disconnect()
+        assert all(item.closed for item in backend.transports)
+        assert not PortRegistry.is_owned(expected_port)
+
+
+def test_reconnect_cancels_old_calls_and_queued_callbacks(
+    device: SerialForge,
+) -> None:
+    """Cancel pending commands and suppress successful callbacks on replace."""
+    read = device.add("Read", "VALUE:.*")
+    silent = device.add("Silent", "NEVER", timeout_s=2)
+    callbacks: list[Message[Any]] = []
+    completed = device.send_async(read).add_done_callback(callbacks.append)
+    assert completed._done_event.wait(0.5)
+    previous_result = completed.result()
+    pending = device.send_async(silent).add_done_callback(callbacks.append)
+    queued = device.send_async(read).add_done_callback(callbacks.append)
+    device._on_raw_receive(b"old partial")
+    assert device._receive_splitters
+
+    device.connect("FACADE")
+
+    for call in (pending, queued):
+        assert call.done
+        with pytest.raises(CommandCancelledError):
+            call.result()
+    assert completed.result() is previous_result
+    assert not device._receive_splitters
+    app().processEvents()
+    assert not callbacks
+    assert device.send_sync(read).data == "VALUE:42"
+
+
+@pytest.mark.parametrize(
+    "target", ["MISSING", DeviceInfo(port="MISSING", baudrate=115200)]
+)
+def test_failed_replacement_releases_old_device_and_allows_retry(
+    device: SerialForge, target: str | DeviceInfo
+) -> None:
+    """Keep no old connection after failure and accept a later connect."""
+    core = device._core
+    assert core is not None and core._worker is not None
+    old_worker = core._worker
+    with pytest.raises(SerialForgeError):
+        device.connect(target)
+    assert device.state is ConnectionState.FAILED
+    assert not old_worker.isRunning()
+    assert not PortRegistry.is_owned("FACADE")
+    assert not PortRegistry.is_owned("MISSING")
+    device.connect("FACADE")
+    assert device.state is ConnectionState.CONNECTED
+    assert device.send_sync(device.add("Read", "VALUE:.*")).data == "VALUE:42"
 
 
 def test_sync_result_and_nonempty_receive_signal(device: SerialForge) -> None:
