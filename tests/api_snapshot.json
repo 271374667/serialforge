@@ -220,7 +220,7 @@
     "serialforge.Message": {
       "overloads": {},
       "methods": {
-        "__init__": "(self, category: 'MessageCategory', timestamp: 'float', data: 'T | list[T] | None' = None, spec: 'CommandSpec | EventSpec | None' = None, request_id: 'str' = '', raw_frames: 'tuple[bytes, ...]' = (), raw_data: 'bytes' = b'', context: 'Mapping[str, object]' = <factory>, status: 'CommandStatus' = <CommandStatus.NONE: 'none'>, route: 'SendRoute' = <SendRoute.NONE: 'none'>, params: 'Mapping[str, object]' = <factory>, sent: 'bytes' = b'', elapsed_s: 'float' = -1.0, error_message: 'str' = '') -> None"
+        "__init__": "(self, category: 'MessageCategory', timestamp: 'float', data: 'list[T]' = <factory>, spec: 'CommandSpec | EventSpec | None' = None, request_id: 'str' = '', raw_frames: 'tuple[bytes, ...]' = (), raw_data: 'bytes' = b'', context: 'Mapping[str, object]' = <factory>, status: 'CommandStatus' = <CommandStatus.NONE: 'none'>, route: 'SendRoute' = <SendRoute.NONE: 'none'>, params: 'Mapping[str, object]' = <factory>, sent: 'bytes' = b'', elapsed_s: 'float' = -1.0, error_message: 'str' = '') -> None"
       },
       "properties": {
         "ok": "(self) -> 'bool'",
@@ -240,7 +240,7 @@
         },
         {
           "name": "data",
-          "type": "T | list[T] | None",
+          "type": "list[T]",
           "kw_only": false
         },
         {

@@ -258,8 +258,9 @@ class InteractiveConsole:
         elif event.spec is TELEMETRY:
             print(f"  [上报] {event.data}")
         elif event.spec is ALARM:
-            assert isinstance(event.data, Alarm)
-            print(f"  [报警] 报警码 {event.data.code}")
+            alarm = event.data[0]
+            assert isinstance(alarm, Alarm)
+            print(f"  [报警] 报警码 {alarm.code}")
         else:
             print(f"  [未识别帧] {event.raw_frame!r}")
 

@@ -7,7 +7,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Generic, TypeVar
+from typing import Generic, TypeVar, cast
 
 from serialforge.enums import CommandStatus, MessageCategory, SendRoute
 from serialforge.models import CommandSpec, EventSpec, _freeze_context
@@ -28,7 +28,7 @@ class Message(Generic[T]):
 
     category: MessageCategory
     timestamp: float
-    data: T | list[T] | None = None
+    data: list[T] = field(default_factory=list)
     spec: CommandSpec | EventSpec | None = None
     request_id: str = ""
     raw_frames: tuple[bytes, ...] = ()
@@ -42,7 +42,21 @@ class Message(Generic[T]):
     error_message: str = ""
 
     def __post_init__(self) -> None:
-        """Freeze containers without altering declaration identity."""
+        """Normalize payloads to one list without altering declaration identity.
+
+        The dispatcher still accepts the legacy scalar/``None`` result shape.
+        Normalizing at this boundary gives every public ``Message`` the same
+        list-shaped payload: a single response is a one-item list and a
+        no-reply result is an empty list.
+        """
+        payload = cast(object, self.data)
+        if payload is None:
+            values: list[T] = []
+        elif isinstance(payload, list):
+            values = cast(list[T], list(payload))
+        else:
+            values = [cast(T, payload)]
+        object.__setattr__(self, "data", values)
         object.__setattr__(self, "context", _freeze_context(self.context))
         object.__setattr__(self, "params", MappingProxyType(dict(self.params)))
         object.__setattr__(self, "raw_frames", tuple(self.raw_frames))

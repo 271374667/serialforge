@@ -262,7 +262,7 @@ def test_connect_replaces_session_before_opening_target(
                 assert not PortRegistry.is_owned("FIRST")
             result = facade.send_sync(read)
             assert (
-                result.spec is read and result.data == f"VALUE:{expected_port}"
+                result.spec is read and result.data == [f"VALUE:{expected_port}"]
             )
             app().processEvents()
             expected_states = [ConnectionState.DISCONNECTED]
@@ -304,7 +304,7 @@ def test_reconnect_cancels_old_calls_and_queued_callbacks(
     assert not device._receive_splitters
     app().processEvents()
     assert not callbacks
-    assert device.send_sync(read).data == "VALUE:42"
+    assert device.send_sync(read).data == ["VALUE:42"]
 
 
 @pytest.mark.parametrize(
@@ -325,7 +325,7 @@ def test_failed_replacement_releases_old_device_and_allows_retry(
     assert not PortRegistry.is_owned("MISSING")
     device.connect("FACADE")
     assert device.state is ConnectionState.CONNECTED
-    assert device.send_sync(device.add("Read", "VALUE:.*")).data == "VALUE:42"
+    assert device.send_sync(device.add("Read", "VALUE:.*")).data == ["VALUE:42"]
 
 
 def test_sync_result_and_nonempty_receive_signal(device: SerialForge) -> None:
@@ -334,7 +334,7 @@ def test_sync_result_and_nonempty_receive_signal(device: SerialForge) -> None:
     device.received.connect(observed.append)
     spec = device.add("Read", r"VALUE:(?P<value>\d+)")
     result = device.send_sync(spec, context={"widget": "row"})
-    assert result.data == "VALUE:42" and result.spec is spec
+    assert result.data == ["VALUE:42"] and result.spec is spec
     wait(lambda: bool(observed))
     assert result.context == {"widget": "row"}
     assert all(item is not result for item in observed)
@@ -498,7 +498,7 @@ def test_fragmented_serial_response_emits_one_raw_line(
         for item in observed
         if item.category is MessageCategory.RAW_RECEIVE
     ] == [b">SN_INFO_GET=B0002B\r\n"]
-    assert result.data == ">SN_INFO_GET=B0002B" and result.spec is spec
+    assert result.data == [">SN_INFO_GET=B0002B"] and result.spec is spec
 
 
 def test_received_never_emits_empty_raw_data_and_keeps_callbacks(
@@ -514,7 +514,7 @@ def test_received_never_emits_empty_raw_data_and_keeps_callbacks(
     assert device._core is not None
     device._core._dispatcher.flush_events()
     app().processEvents()
-    assert callbacks[0] is call.result() and callbacks[0].data == 42
+    assert callbacks[0] is call.result() and callbacks[0].data == [42]
     assert [item.raw_data for item in observed] == [b"VALUE:42\r\n"]
     assert all(item.raw_data for item in observed)
     assert callbacks[0] not in observed
@@ -577,7 +577,7 @@ def test_callback_main_thread_closure_order_and_late_replay(
     assert all(item[2] == app().thread() for item in called)
     assert all(item[1] is call.result() for item in called)
     assert call.result().context is call.context
-    assert call.result().data == {"value": "42"}
+    assert call.result().data == [{"value": "42"}]
     call.add_done_callback(
         lambda result: called.append((3, result, QThread.currentThread()))
     )
@@ -740,7 +740,7 @@ def test_scan_closes_connection_before_configuring_and_probing(
     assert device._core is not None and device._core._init_sequence == (read,)
     device.connect(found[0])
     assert device.send_sync(read).spec is read
-    assert device.send_sync(read).data == "VALUE:42"
+    assert device.send_sync(read).data == ["VALUE:42"]
 
 
 def test_scan_cancels_previous_calls_and_callbacks(device: SerialForge) -> None:
@@ -976,7 +976,7 @@ def test_multi_parser_and_no_reply(device: SerialForge) -> None:
     assert device.send_sync(multi).data == [{"value": "1"}, {"value": "2"}]
     stop = device.add("Stop", mode=ResponseMode.NO_REPLY)
     result = device.send_sync(stop)
-    assert result.ok and result.data is None and result.sent == b"Stop\r\n"
+    assert result.ok and result.data == [] and result.sent == b"Stop\r\n"
 
 
 def test_error_queue_and_counter() -> None:
@@ -1150,8 +1150,8 @@ def test_tagged_contexts_and_control_named_placeholder(
     assert first.request_id != second.request_id
     assert first.result().context["row"] == 1
     assert second.result().context["row"] == 2
-    assert first.result().data == {"priority": "1", "value": "41"}
-    assert second.result().data == {"priority": "2", "value": "42"}
+    assert first.result().data == [{"priority": "1", "value": "41"}]
+    assert second.result().data == [{"priority": "2", "value": "42"}]
 
 
 def test_callback_errors_use_host_boundary_and_continue(
