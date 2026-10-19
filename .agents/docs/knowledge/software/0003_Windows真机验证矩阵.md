@@ -8,6 +8,8 @@
 - 库只支持 Windows 10/11 x64；没有设备、第二台系统或第二种 USB 转串口芯片时，
   单元测试和本地 CI **不能**替代真机结论；矩阵里的 `未验证` 不代表通过。
 - 回环测试必须显式选择 `-m hardware` 才执行，并先设好启用变量与端口。
+- TX-RX 回环只在**独立适配器**上把 TX 与 RX 物理短接后才有意义：普通目标设备不会回传
+  `SERIALFORGE_LOOPBACK`，此时回环用例超时只说明接线场景不对，不代表库有问题。
 - `ReadLoopConfig.poll_min_s` 要先用 `scripts/measure_windows_timer.py` 实测本机定时器粒度，
   不能把 5 ms 默认值当作真机测量结果。
 - 每次新增实测按文末「现场记录模板」记录，失败项保留错误信息与重现步骤，不能只写"通过"。
@@ -36,11 +38,15 @@ Remove-Item Env:SERIALFORGE_RUN_HARDWARE
 ```
 
 回环测试直连显式的 DeviceInfo，不做探测；发送 `SERIALFORGE_LOOPBACK\r\n` 并要求完整
-回显。默认 pytest 即使设置了启用变量，也只有选择 `-m hardware` 才能执行硬件测试。
-2026-10-08 本次 Windows 11 现场复测已打开 COM11。`test_real_port_tx_rx_loopback` 能建立
-连接，但发送 `SERIALFORGE_LOOPBACK\r\n` 后 1 秒超时，没有收到回显；这项结果不能替代
-已正确短接 TX/RX 的回环结论。随后在 `dtr=False`、`rts=False` 下发送只读的
- `Version\r\n`，收到 `Software version 1.02`。
+回显。这条路径**只对 TX/RX 已短接的独立适配器成立**：把适配器接到目标设备时，目标设备
+不认识这段文本，不会有任何回传。默认 pytest 即使设置了启用变量，也只有选择
+`-m hardware` 才能执行硬件测试。
+
+2026-10-08 本次 Windows 11 现场复测打开的是接在目标设备上的 COM11：
+`test_real_port_tx_rx_loopback` 能建立连接，但发送 `SERIALFORGE_LOOPBACK\r\n` 后 1 秒
+超时——该设备对这段文本不回传，所以回环项仍记 `未验证`，要换到独立短接的适配器重测。
+随后在 `dtr=False`、`rts=False` 下发送只读的 `Version\r\n`，收到
+`Software version 1.02`。
 
 ### 矩阵
 
@@ -48,7 +54,7 @@ Remove-Item Env:SERIALFORGE_RUN_HARDWARE
 
 | 系统 | 芯片/适配器 | 正常收发 | 拔插重连 | 睡眠唤醒 | TX-RX 回环 | DTR/RTS | 计时粒度 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Windows 11 x64 | Prolific PL2303GT (`067B:23A3`) | 已验证：COM11 `Version` 查询/发现，收到 `Software version 1.02` | 未验证 | 未验证 | 未通过：连接成功但回环无回显，未确认 TX-RX 物理短接 | 部分验证：`dtr=False`/`rts=False` 下 `Version` 成功；脉冲未测 | 已测：1 ms 中位 1.516 ms |
+| Windows 11 x64 | Prolific PL2303GT (`067B:23A3`) | 已验证：COM11 `Version` 查询/发现，收到 `Software version 1.02` | 未验证 | 未验证 | 未验证：现场接的是目标设备，对 `SERIALFORGE_LOOPBACK` 不回传；需独立适配器短接 TX/RX | 部分验证：`dtr=False`/`rts=False` 下 `Version` 成功；脉冲未测 | 已测：1 ms 中位 1.516 ms |
 | Windows 11 x64 | CH340 | 未验证 | 未验证 | 未验证 | 未验证 | 未验证 | 未验证 |
 | Windows 11 x64 | CP210x 或 FTDI | 未验证 | 未验证 | 未验证 | 未验证 | 未验证 | 未验证 |
 | Windows 10 x64 | Prolific PL2303 | 未验证 | 未验证 | 未验证 | 未验证 | 未验证 | 未验证 |
@@ -90,7 +96,8 @@ wheel 和 sdist 成员检查确认没有 tests、testing、examples 或字节码
 - Windows 11 x64，内部版本 `10.0.26200`；Python `3.11.12`，64 位。
 - Prolific PL2303GT（`067B:23A3`），`COM11`，`115200` 波特率。
 - `dtr=False`、`rts=False` 下 `Version\r\n` 收到 `Software version 1.02`。
-- 回环用例连接成功，但 `SERIALFORGE_LOOPBACK\r\n` 在 1 秒内无回显；未确认独立适配器 TX/RX 物理短接。
+- 回环用例连接成功，但 `SERIALFORGE_LOOPBACK\r\n` 在 1 秒内无回显：现场连的是目标设备，
+  它不会回传回环文本；回环项保持 `未验证`，待独立短接适配器复测。
 - Windows 计时脚本 100 个 1 ms 样本：`1.020 / 1.516 / 2.210 ms`（最短 / 中位 / 最长）。
 
 ### 现场记录模板

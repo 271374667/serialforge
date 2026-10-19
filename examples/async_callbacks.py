@@ -84,7 +84,7 @@ class AsyncCallbackDemo:
         with self._device.attached():
             try:
                 # 阻塞式连接：返回时设备已打开并初始化好，可以直接发送。
-                self._forge.connect()
+                self._forge.connect_sync()
                 print(f"[连接] {self._forge.state.value}")
                 self._demo_done_callback()
                 self._demo_failure_keeps_callback_silent()

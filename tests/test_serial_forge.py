@@ -36,7 +36,6 @@ from serialforge.errors import (
     CommandParseError,
     CommandTimeoutError,
     ConfigError,
-    ProbeError,
 )
 from serialforge.protocols import TransportProtocol
 from serialforge.qt_core import QCoreApplication, QThread
@@ -101,7 +100,7 @@ def device() -> Iterator[SerialForge]:
             probe_pattern="READY",
             serial=SerialConfig(settle_time_s=0),
         )
-        facade.connect("FACADE")
+        facade.connect_sync("FACADE")
         app().processEvents()
         try:
             yield facade
@@ -174,7 +173,7 @@ def test_add_object_fields_and_atomic_configure(device: SerialForge) -> None:
         probe_pattern="READY",
         serial=SerialConfig(settle_time_s=0),
     )
-    device.connect("FACADE")
+    device.connect_sync("FACADE")
     assert device.send_sync(spec).spec is spec
     device.remove(spec)
     with pytest.raises(CommandError):
@@ -227,7 +226,7 @@ def test_connect_replaces_session_before_opening_target(
         read = facade.add("Read", "VALUE:.*")
         facade.set_init_sequence([init])
         try:
-            facade.connect(DeviceInfo(port="FIRST", baudrate=115200))
+            facade.connect_sync(DeviceInfo(port="FIRST", baudrate=115200))
             core = facade._core
             assert core is not None and core._worker is not None
             old_worker = core._worker
@@ -250,7 +249,7 @@ def test_connect_replaces_session_before_opening_target(
                 return open_transport(port, params)
 
             monkeypatch.setattr(backend, "open", open_after_close)
-            assert facade.connect(target) is None
+            assert facade.connect_sync(target) is None
             assert facade.state is ConnectionState.CONNECTED
             assert not old_worker.isRunning() and not old_reader.isRunning()
             assert closed_before_open and all(closed_before_open)
@@ -294,7 +293,7 @@ def test_reconnect_cancels_old_calls_and_queued_callbacks(
     device._on_raw_receive(b"old partial")
     assert device._receive_splitters
 
-    device.connect("FACADE")
+    device.connect_sync("FACADE")
 
     for call in (pending, queued):
         assert call.done
@@ -318,12 +317,12 @@ def test_failed_replacement_releases_old_device_and_allows_retry(
     assert core is not None and core._worker is not None
     old_worker = core._worker
     with pytest.raises(SerialForgeError):
-        device.connect(target)
+        device.connect_sync(target)
     assert device.state is ConnectionState.FAILED
     assert not old_worker.isRunning()
     assert not PortRegistry.is_owned("FACADE")
     assert not PortRegistry.is_owned("MISSING")
-    device.connect("FACADE")
+    device.connect_sync("FACADE")
     assert device.state is ConnectionState.CONNECTED
     assert device.send_sync(device.add("Read", "VALUE:.*")).data == ["VALUE:42"]
 
@@ -712,20 +711,20 @@ def test_scan_closes_connection_before_configuring_and_probing(
         baudrates=[115200], probe=probe, serial=SerialConfig(settle_time_s=0)
     )
     if configuration == "saved":
-        found = device.scan()
+        found = device.scan_sync()
         assert device._profile is old_profile
     elif configuration == "profile":
-        found = device.scan(profile)
+        found = device.scan_sync(profile)
         assert device._profile is profile
     elif configuration == "spec_fields":
-        found = device.scan(
+        found = device.scan_sync(
             baudrates=[115200],
             probe=probe,
             serial=SerialConfig(settle_time_s=0),
         )
         assert device._profile is not None and device._profile.probe is probe
     else:
-        found = device.scan(
+        found = device.scan_sync(
             baudrates=[115200],
             probe="Probe",
             probe_pattern="READY",
@@ -738,7 +737,7 @@ def test_scan_closes_connection_before_configuring_and_probing(
     assert all(item.closed for item in backend.transports)
     assert not PortRegistry.is_owned("FACADE")
     assert device._core is not None and device._core._init_sequence == (read,)
-    device.connect(found[0])
+    device.connect_sync(found[0])
     assert device.send_sync(read).spec is read
     assert device.send_sync(read).data == ["VALUE:42"]
 
@@ -755,7 +754,7 @@ def test_scan_cancels_previous_calls_and_callbacks(device: SerialForge) -> None:
     queued = device.send_async(read).add_done_callback(callbacks.append)
     device._on_raw_receive(b"old partial")
 
-    assert device.scan()
+    assert device.scan_sync()
 
     for call in (pending, queued):
         with pytest.raises(CommandCancelledError):
@@ -771,7 +770,7 @@ def test_scan_stays_disconnected_without_matching_devices(
 ) -> None:
     """Return no matches after releasing the old device and accept a retry."""
     assert (
-        device.scan(
+        device.scan_sync(
             baudrates=[9600],
             probe="Probe",
             probe_pattern="READY",
@@ -783,7 +782,7 @@ def test_scan_stays_disconnected_without_matching_devices(
     assert device.state is ConnectionState.DISCONNECTED
     assert not PortRegistry.is_owned("FACADE")
     assert not device._connecting and not device._scanning
-    assert device.scan(
+    assert device.scan_sync(
         baudrates=[115200],
         probe="Probe",
         probe_pattern="READY",
@@ -807,12 +806,14 @@ def test_scan_aborts_when_old_connection_cannot_be_stopped(
     with monkeypatch.context() as patch:
         patch.setattr(core, "disconnect", fail_disconnect)
         with pytest.raises(SerialForgeError, match="did not stop"):
-            device.scan(baudrates=[9600], probe="Probe", probe_pattern="READY")
+            device.scan_sync(
+                baudrates=[9600], probe="Probe", probe_pattern="READY"
+            )
     assert device._profile is old_profile
     assert tuple(backend.transports) == old_transports
     assert device.state is ConnectionState.CONNECTED
     assert not device._connecting and not device._scanning
-    assert device.scan()
+    assert device.scan_sync()
 
 
 @pytest.mark.parametrize("failure", ["configuration", "probe"])
@@ -829,17 +830,18 @@ def test_scan_failure_leaves_old_device_closed_and_allows_retry(
     with monkeypatch.context() as patch:
         if failure == "configuration":
             with pytest.raises(ConfigError):
-                device.scan(baudrates=[], probe="Probe", probe_pattern="READY")
+                device.scan_sync(
+                    baudrates=[], probe="Probe", probe_pattern="READY"
+                )
         else:
             patch.setattr(backend, "open", fail_open)
-            with pytest.raises(ProbeError):
-                device.scan()
+            assert device.scan_sync() == []
     assert device._profile is old_profile
     assert device.state is ConnectionState.DISCONNECTED
     assert not PortRegistry.is_owned("FACADE")
     assert all(item.closed for item in backend.transports)
     assert not device._connecting and not device._scanning
-    assert device.scan()
+    assert device.scan_sync()
 
 
 @pytest.mark.parametrize("phase", ["disconnect", "probe"])
@@ -873,7 +875,7 @@ def test_scan_rejects_concurrent_lifecycle_operations(
 
     def scan_in_thread() -> None:
         try:
-            device.scan(mode=ScanMode.FIRST_MATCH)
+            device.scan_sync(mode=ScanMode.FIRST_MATCH)
         except Exception as error:
             failures.append(error)
 
@@ -882,13 +884,13 @@ def test_scan_rejects_concurrent_lifecycle_operations(
     try:
         assert entered.wait(2)
         with pytest.raises(ConfigError):
-            device.scan()
+            device.scan_sync()
         with pytest.raises(ConfigError):
-            device.scan(
+            device.scan_sync(
                 baudrates=[115200], probe="Probe", probe_pattern="READY"
             )
         with pytest.raises(ConfigError):
-            device.connect("FACADE")
+            device.connect_sync("FACADE")
         with pytest.raises(ConfigError):
             device.configure(
                 baudrates=[115200], probe="Probe", probe_pattern="READY"
@@ -922,7 +924,7 @@ def test_scan_returns_results_and_observes_probe_bytes() -> None:
     facade.raw_sent.connect(sent.append)
     facade.received.connect(received.append)
     with use_fake_backend(backend):
-        found = facade.scan(
+        found = facade.scan_sync(
             baudrates=[115200],
             probe="Probe",
             probe_pattern="READY",
@@ -954,7 +956,7 @@ def test_scan_discards_unterminated_reads_from_previous_baudrate() -> None:
     observed: list[Message[Any]] = []
     facade.received.connect(observed.append)
     with use_fake_backend(backend):
-        found = facade.scan(
+        found = facade.scan_sync(
             baudrates=[9600, 115200],
             probe="Probe",
             probe_pattern="READY",
@@ -1104,12 +1106,10 @@ def test_disconnect_cancels_pending_without_callback(
     assert not received and not call._callbacks
 
 
-def test_scan_io_fault_raises_and_closes_handle(
+def test_scan_io_fault_is_skipped_and_closes_handle(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Raise a probe fault instead of converting backend failure into no
-    match.
-    """
+    """Skip an unopenable port and return no match instead of raising."""
     app()
     backend = FakeBackend([SimulatedDevice(None, None, port="FAULT")])
 
@@ -1118,18 +1118,444 @@ def test_scan_io_fault_raises_and_closes_handle(
 
     monkeypatch.setattr(backend, "open", fail)
     facade = SerialForge()
-    with (
-        use_fake_backend(backend),
-        pytest.raises(ProbeError, match="open failed"),
-    ):
-        facade.scan(
+    with use_fake_backend(backend):
+        assert (
+            facade.scan_sync(
+                baudrates=[115200],
+                probe="Probe",
+                probe_pattern="READY",
+                serial=SerialConfig(settle_time_s=0),
+            )
+            == []
+        )
+    assert facade._scan_done.is_set()
+    facade.disconnect()
+
+
+def test_scan_async_requires_configuration() -> None:
+    """Fail synchronously when no profile was configured and no fields came."""
+    app()
+    facade = SerialForge()
+    with pytest.raises(ConfigError):
+        facade.scan_async()
+
+
+def test_scan_async_disconnects_the_current_session_first(
+    device: SerialForge,
+) -> None:
+    """Rescan a connected facade by closing its session inside the worker."""
+    seen: list[list[DeviceInfo]] = []
+    call = device.scan_async()
+    call.add_done_callback(seen.append)
+    wait(lambda: call.done)
+    wait(lambda: bool(seen))
+    assert [item.port for item in seen[0]] == ["FACADE"]
+    assert device.state is ConnectionState.DISCONNECTED
+
+
+def test_connect_async_returns_immediately_and_calls_back() -> None:
+    """Connect in a worker and hand the device to a main-thread closure."""
+    app()
+    backend = FakeBackend(
+        [
+            SimulatedDevice(
+                None,
+                None,
+                port="ASYNC-CONN",
+                baudrate=115200,
+                responses={b"Probe\r\n": b"READY\r\n"},
+            )
+        ]
+    )
+    main_thread = threading.get_ident()
+    seen: list[tuple[int, DeviceInfo]] = []
+    with use_fake_backend(backend):
+        facade = SerialForge()
+        facade.configure(
             baudrates=[115200],
             probe="Probe",
             probe_pattern="READY",
             serial=SerialConfig(settle_time_s=0),
         )
-    assert facade._scan_done.is_set()
-    facade.disconnect()
+        started = time.monotonic()
+        call = facade.connect_async("ASYNC-CONN")
+        assert time.monotonic() - started < 0.2
+        assert not call.done
+        call.add_done_callback(
+            lambda device: seen.append((threading.get_ident(), device))
+        )
+        wait(lambda: call.done)
+        wait(lambda: bool(seen))
+        assert seen[0][0] == main_thread
+        assert seen[0][1].port == "ASYNC-CONN"
+        assert call.result().port == "ASYNC-CONN"
+        assert facade.state is ConnectionState.CONNECTED
+        facade.disconnect()
+
+
+def test_connect_async_failure_skips_callback_and_raises_from_result() -> None:
+    """Keep success closures silent and retain the error for result()."""
+    app()
+    backend = FakeBackend([SimulatedDevice(None, None, port="ASYNC-CONN")])
+    with use_fake_backend(backend):
+        facade = SerialForge()
+        facade.configure(
+            baudrates=[115200],
+            probe="Probe",
+            probe_pattern="READY",
+            serial=SerialConfig(settle_time_s=0),
+        )
+        call = facade.connect_async("MISSING")
+        seen: list[DeviceInfo] = []
+        call.add_done_callback(seen.append)
+        wait(lambda: call.done, timeout=3)
+        assert seen == []
+        assert call.exception is not None
+        with pytest.raises(SerialForgeError):
+            call.result()
+        facade.disconnect()
+
+
+def test_connect_async_cancel_suppresses_callback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Stop a pending connection attempt without running success closures."""
+    app()
+    backend = FakeBackend(
+        [SimulatedDevice(None, None, port="ASYNC-CONN-CANCEL")]
+    )
+    open_port = backend.open
+
+    def slow_open(
+        port: str, params: Mapping[str, object]
+    ) -> TransportProtocol:
+        time.sleep(0.3)
+        return open_port(port, params)
+
+    monkeypatch.setattr(backend, "open", slow_open)
+    with use_fake_backend(backend):
+        facade = SerialForge()
+        facade.configure(
+            baudrates=[115200],
+            probe="Probe",
+            probe_pattern="READY",
+            serial=SerialConfig(settle_time_s=0),
+        )
+        call = facade.connect_async("ASYNC-CONN-CANCEL")
+        seen: list[DeviceInfo] = []
+        call.add_done_callback(seen.append)
+        time.sleep(0.05)
+        call.cancel()
+        wait(lambda: call.done, timeout=3)
+        assert call.cancelled
+        assert seen == []
+        with pytest.raises(SerialForgeError):
+            call.result()
+        facade.disconnect()
+
+
+def test_connect_async_rejects_concurrent_lifecycle_operations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reserve the facade while the asynchronous connection is pending."""
+    app()
+    backend = FakeBackend(
+        [SimulatedDevice(None, None, port="ASYNC-CONN-BUSY")]
+    )
+    open_port = backend.open
+
+    def slow_open(
+        port: str, params: Mapping[str, object]
+    ) -> TransportProtocol:
+        time.sleep(0.3)
+        return open_port(port, params)
+
+    monkeypatch.setattr(backend, "open", slow_open)
+    with use_fake_backend(backend):
+        facade = SerialForge()
+        facade.configure(
+            baudrates=[115200],
+            probe="Probe",
+            probe_pattern="READY",
+            serial=SerialConfig(settle_time_s=0),
+        )
+        call = facade.connect_async("ASYNC-CONN-BUSY")
+        with pytest.raises(ConfigError):
+            facade.connect_async()
+        with pytest.raises(ConfigError):
+            facade.connect_sync()
+        with pytest.raises(ConfigError):
+            facade.scan_async()
+        with pytest.raises(ConfigError):
+            facade.configure(
+                baudrates=[9600],
+                probe="Probe",
+                probe_pattern="READY",
+            )
+        call.cancel()
+        wait(lambda: call.done, timeout=3)
+        facade.disconnect()
+
+
+def test_disconnect_during_connect_async_returns_without_deadlock() -> None:
+    """Join a pending asynchronous connection from another thread."""
+    app()
+    backend = FakeBackend(
+        [SimulatedDevice(None, None, port="ASYNC-CONN-JOIN")]
+    )
+    with use_fake_backend(backend):
+        facade = SerialForge()
+        facade.configure(
+            baudrates=[115200],
+            probe="Probe",
+            probe_pattern="READY",
+            serial=SerialConfig(settle_time_s=0),
+        )
+        call = facade.connect_async("ASYNC-CONN-JOIN")
+        seen: list[DeviceInfo] = []
+        call.add_done_callback(seen.append)
+        time.sleep(0.05)
+        started = time.monotonic()
+        facade.disconnect()
+        assert time.monotonic() - started < 3
+        wait(lambda: call.done)
+        assert call.cancelled
+        assert seen == []
+
+
+def test_scan_async_callback_can_start_the_next_scan() -> None:
+    """Free the facade before callbacks so a closure may scan again."""
+    app()
+    backend = FakeBackend(
+        [
+            SimulatedDevice(
+                None,
+                None,
+                port="ASYNC-NEXT",
+                baudrate=115200,
+                responses={b"Probe\r\n": b"READY\r\n"},
+            )
+        ]
+    )
+    results: list[int] = []
+    with use_fake_backend(backend):
+        facade = SerialForge()
+
+        def first_done(devices: list[DeviceInfo]) -> None:
+            assert [item.port for item in devices] == ["ASYNC-NEXT"]
+            second = facade.scan_async(
+                baudrates=[115200],
+                probe="Probe",
+                probe_pattern="READY",
+                serial=SerialConfig(settle_time_s=0),
+            )
+            second.add_done_callback(
+                lambda again: results.append(len(again))
+            )
+
+        first = facade.scan_async(
+            baudrates=[115200],
+            probe="Probe",
+            probe_pattern="READY",
+            serial=SerialConfig(settle_time_s=0),
+        )
+        first.add_done_callback(first_done)
+        wait(lambda: bool(results), timeout=3)
+        assert results == [1]
+        facade.disconnect()
+
+
+def test_scan_async_returns_immediately_and_calls_back_on_main_thread() -> None:
+    """Hand the discovered devices to a main-thread closure without blocking."""
+    app()
+    backend = FakeBackend(
+        [
+            SimulatedDevice(
+                None,
+                None,
+                port="ASYNC",
+                baudrate=115200,
+                responses={b"Probe\r\n": b"READY\r\n"},
+            )
+        ]
+    )
+    main_thread = threading.get_ident()
+    seen: list[tuple[int, list[DeviceInfo]]] = []
+    with use_fake_backend(backend):
+        facade = SerialForge()
+        started = time.monotonic()
+        call = facade.scan_async(
+            baudrates=[115200],
+            probe="Probe",
+            probe_pattern="READY",
+            serial=SerialConfig(settle_time_s=0),
+        )
+        assert time.monotonic() - started < 0.2
+        assert not call.done
+        call.add_done_callback(
+            lambda devices: seen.append((threading.get_ident(), devices))
+        )
+        wait(lambda: call.done)
+        wait(lambda: bool(seen))
+        assert seen[0][0] == main_thread
+        assert [item.port for item in seen[0][1]] == ["ASYNC"]
+        assert [item.port for item in call.result()] == ["ASYNC"]
+        assert not call.cancelled and call.exception is None
+        facade.disconnect()
+
+
+def test_scan_async_result_waits_for_completion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reject early result reads while the worker is still scanning."""
+    app()
+    backend = FakeBackend(
+        [SimulatedDevice(None, None, port="ASYNC-WAIT", baudrate=115200)]
+    )
+    open_port = backend.open
+
+    def open_later(
+        port: str, params: Mapping[str, object]
+    ) -> TransportProtocol:
+        time.sleep(0.2)
+        return open_port(port, params)
+
+    monkeypatch.setattr(backend, "open", open_later)
+    with use_fake_backend(backend):
+        facade = SerialForge()
+        call = facade.scan_async(
+            baudrates=[115200],
+            probe="Probe",
+            probe_pattern="READY",
+            serial=SerialConfig(settle_time_s=0),
+        )
+        with pytest.raises(CommandNotReadyError):
+            call.result()
+        wait(lambda: call.done, timeout=3)
+        assert call.result() == []
+        facade.disconnect()
+
+
+def test_scan_async_failure_skips_callback_and_raises_from_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep success closures silent and retain the error for result()."""
+    app()
+    backend = FakeBackend([SimulatedDevice(None, None, port="ASYNC-FAIL")])
+    with use_fake_backend(backend):
+        facade = SerialForge()
+        facade.configure(
+            baudrates=[115200],
+            probe="Probe",
+            probe_pattern="READY",
+            serial=SerialConfig(settle_time_s=0),
+        )
+        core = facade._core
+        assert core is not None
+
+        def fail_disconnect() -> None:
+            raise SerialForgeError("connection worker did not stop")
+
+        with monkeypatch.context() as patch:
+            patch.setattr(core, "disconnect", fail_disconnect)
+            call = facade.scan_async()
+            seen: list[list[DeviceInfo]] = []
+            call.add_done_callback(seen.append)
+            wait(lambda: call.done)
+            assert seen == []
+            assert isinstance(call.exception, SerialForgeError)
+            with pytest.raises(SerialForgeError, match="did not stop"):
+                call.result()
+        facade.disconnect()
+
+
+def test_scan_async_rejects_concurrent_lifecycle_operations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reserve the facade while the asynchronous scan is still running."""
+    app()
+    backend = FakeBackend(
+        [SimulatedDevice(None, None, port="ASYNC-BUSY", baudrate=115200)]
+    )
+    open_port = backend.open
+
+    def open_later(
+        port: str, params: Mapping[str, object]
+    ) -> TransportProtocol:
+        time.sleep(0.3)
+        return open_port(port, params)
+
+    monkeypatch.setattr(backend, "open", open_later)
+    with use_fake_backend(backend):
+        facade = SerialForge()
+        facade.configure(
+            baudrates=[115200],
+            probe="Probe",
+            probe_pattern="READY",
+            serial=SerialConfig(settle_time_s=0),
+        )
+        call = facade.scan_async()
+        with pytest.raises(ConfigError):
+            facade.scan_async()
+        with pytest.raises(ConfigError):
+            facade.scan_sync()
+        with pytest.raises(ConfigError):
+            facade.connect_sync()
+        with pytest.raises(ConfigError):
+            facade.configure(
+                baudrates=[9600],
+                probe="Probe",
+                probe_pattern="READY",
+            )
+        call.cancel()
+        wait(lambda: call.done, timeout=3)
+        facade.disconnect()
+
+
+def test_scan_async_cancel_suppresses_callback() -> None:
+    """Stop the worker without running success closures."""
+    app()
+    backend = FakeBackend([SimulatedDevice(None, None, port="ASYNC-CANCEL")])
+    with use_fake_backend(backend):
+        facade = SerialForge()
+        call = facade.scan_async(
+            baudrates=[115200],
+            probe="Probe",
+            probe_pattern="READY",
+            serial=SerialConfig(settle_time_s=0),
+        )
+        seen: list[list[DeviceInfo]] = []
+        call.add_done_callback(seen.append)
+        wait(lambda: facade._scanning, timeout=3)
+        call.cancel()
+        wait(lambda: call.done, timeout=3)
+        assert call.cancelled
+        assert seen == []
+        assert call.result() == []
+        facade.disconnect()
+
+
+def test_disconnect_during_scan_async_returns_and_suppresses_callback() -> None:
+    """Join the asynchronous scan from another thread without a deadlock."""
+    app()
+    backend = FakeBackend([SimulatedDevice(None, None, port="ASYNC-JOIN")])
+    with use_fake_backend(backend):
+        facade = SerialForge()
+        call = facade.scan_async(
+            baudrates=[115200],
+            probe="Probe",
+            probe_pattern="READY",
+            serial=SerialConfig(settle_time_s=0),
+        )
+        seen: list[list[DeviceInfo]] = []
+        call.add_done_callback(seen.append)
+        wait(lambda: facade._scanning, timeout=3)
+        started = time.monotonic()
+        facade.disconnect()
+        assert time.monotonic() - started < 3
+        wait(lambda: call.done)
+        assert call.cancelled
+        assert seen == []
 
 
 def test_tagged_contexts_and_control_named_placeholder(

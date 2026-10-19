@@ -30,6 +30,7 @@ class SimulatedDevice:
     latency_s: float = 0.0
     chunk_size: int | None = None
     echo: bool = False
+    garbage_on_baud_mismatch: bool = True
     disconnect_after_writes: int | None = None
     baudrate: int | None = None
 

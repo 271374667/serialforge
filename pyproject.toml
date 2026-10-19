@@ -33,6 +33,7 @@ pyqt5 = ["PyQt5>=5.15.11"]
 [dependency-groups]
 dev = [
     "PySide6-Essentials>=6.11.2",
+    "mkdocs-material>=9.7.7",
     "pylint",
     "pytest",
     "pytest-qt",

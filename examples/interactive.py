@@ -131,7 +131,7 @@ class InteractiveConsole:
         with self._device.attached():
             try:
                 # 阻塞式连接：返回时设备已就绪；失败同步抛 SerialForgeError。
-                self._forge.connect()
+                self._forge.connect_sync()
                 print(f"已连接虚拟设备（{self._forge.state.value}）")
                 print("可用命令：")
                 print(self.HELP)

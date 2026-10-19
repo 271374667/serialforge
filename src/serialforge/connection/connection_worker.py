@@ -231,7 +231,6 @@ class ConnectionWorker(QThread):
             return target
         self._handler._transition(ConnectionState.PROBING)
         finder = DeviceFinder(self._handler._profile)
-        finder._strict_errors = True
         finder._preserve_cancel = True
         finder._raw_received = self._handler.raw_received.emit
         finder._raw_sent = self._handler.raw_sent.emit

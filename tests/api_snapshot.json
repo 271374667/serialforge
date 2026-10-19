@@ -39,6 +39,8 @@
     "RuntimeConfig",
     "HandlerStats",
     "CommandCall",
+    "ScanCall",
+    "ConnectCall",
     "SpecRole",
     "DeviceProfile",
     "LogConfig",
@@ -81,7 +83,13 @@
           "(self, *, pattern: 'str', result_type: 'type[T]', name: 'str' = '', parser: \"Callable[[str], T] | Literal['']\" = '') -> 'Spec[T]'",
           "(self, *, pattern: 'str', name: 'str' = '', parser: \"Callable[[str], str] | Literal['']\" = '') -> 'Spec[str]'"
         ],
-        "scan": [
+        "scan_async": [
+          "(self, /, *, mode: 'ScanMode' = <ScanMode.ALL: 'all'>, port: 'str' = '') -> 'ScanCall'",
+          "(self, profile: 'DeviceProfile', /, *, mode: 'ScanMode' = <ScanMode.ALL: 'all'>, port: 'str' = '') -> 'ScanCall'",
+          "(self, /, *, mode: 'ScanMode' = <ScanMode.ALL: 'all'>, port: 'str' = '', baudrates: 'Sequence[int]', probe: 'Spec[Any] | ProbeSpec', vid_pid: 'Sequence[tuple[int, int]]' = (), name: 'str' = '', terminator: 'str' = '\\r\\n', encoding: 'str' = 'utf-8', echo: 'bool' = False, heartbeat_s: 'float' = -1.0, serial: 'SerialConfig | None' = None, framing: 'FramingConfig | None' = None, runtime: 'RuntimeConfig | None' = None) -> 'ScanCall'",
+          "(self, /, *, mode: 'ScanMode' = <ScanMode.ALL: 'all'>, port: 'str' = '', baudrates: 'Sequence[int]', probe: 'str', probe_pattern: 'str', probe_timeout_s: 'float' = 1.0, vid_pid: 'Sequence[tuple[int, int]]' = (), name: 'str' = '', terminator: 'str' = '\\r\\n', encoding: 'str' = 'utf-8', echo: 'bool' = False, heartbeat_s: 'float' = -1.0, serial: 'SerialConfig | None' = None, framing: 'FramingConfig | None' = None, runtime: 'RuntimeConfig | None' = None) -> 'ScanCall'"
+        ],
+        "scan_sync": [
           "(self, /, *, mode: 'ScanMode' = <ScanMode.ALL: 'all'>, port: 'str' = '') -> 'list[DeviceInfo]'",
           "(self, profile: 'DeviceProfile', /, *, mode: 'ScanMode' = <ScanMode.ALL: 'all'>, port: 'str' = '') -> 'list[DeviceInfo]'",
           "(self, /, *, mode: 'ScanMode' = <ScanMode.ALL: 'all'>, port: 'str' = '', baudrates: 'Sequence[int]', probe: 'Spec[Any] | ProbeSpec', vid_pid: 'Sequence[tuple[int, int]]' = (), name: 'str' = '', terminator: 'str' = '\\r\\n', encoding: 'str' = 'utf-8', echo: 'bool' = False, heartbeat_s: 'float' = -1.0, serial: 'SerialConfig | None' = None, framing: 'FramingConfig | None' = None, runtime: 'RuntimeConfig | None' = None) -> 'list[DeviceInfo]'",
@@ -101,9 +109,11 @@
         "configure": "(self, profile: 'DeviceProfile | None' = None, /, **fields: 'Any') -> 'None'",
         "add": "(self, *args: 'Any', **options: 'Any') -> 'CommandSpec | EventSpec'",
         "remove": "(self, spec: 'CommandSpec | EventSpec', /) -> 'None'",
-        "scan": "(self, profile: 'DeviceProfile | None' = None, /, *, mode: 'ScanMode' = <ScanMode.ALL: 'all'>, port: 'str' = '', **fields: 'Any') -> 'list[DeviceInfo]'",
+        "scan_async": "(self, profile: 'DeviceProfile | None' = None, /, *, mode: 'ScanMode' = <ScanMode.ALL: 'all'>, port: 'str' = '', **fields: 'Any') -> 'ScanCall'",
+        "scan_sync": "(self, profile: 'DeviceProfile | None' = None, /, *, mode: 'ScanMode' = <ScanMode.ALL: 'all'>, port: 'str' = '', **fields: 'Any') -> 'list[DeviceInfo]'",
         "cancel_scan": "(self) -> 'None'",
-        "connect": "(self, target: 'str | DeviceInfo' = '') -> 'None'",
+        "connect_sync": "(self, target: 'str | DeviceInfo' = '') -> 'None'",
+        "connect_async": "(self, target: 'str | DeviceInfo' = '') -> 'ConnectCall'",
         "disconnect": "(self) -> 'None'",
         "send_async": "(self, target: 'CommandSpec | str', /, *, timeout_s: 'float' = 3.0, priority: 'CommandPriority' = <CommandPriority.NORMAL: 0>, params: 'Mapping[str, object]' = mappingproxy({}), context: 'Mapping[str, object]' = mappingproxy({})) -> 'CommandCall[Any]'",
         "send_sync": "(self, target: 'CommandSpec | str', /, *, wait_timeout_s: 'float' = 3.0, priority: 'CommandPriority' = <CommandPriority.NORMAL: 0>, params: 'Mapping[str, object]' = mappingproxy({}), context: 'Mapping[str, object]' = mappingproxy({})) -> 'Message[Any]'",
@@ -1088,7 +1098,7 @@
     "serialforge.advanced.RuntimeConfig": {
       "overloads": {},
       "methods": {
-        "__init__": "(self, min_command_interval_s: 'float' = 0.0, queue_limit: 'int' = 256, post_timeout_drain_s: 'float' = 0.2, rto_min_s: 'float' = 0.05, rto_max_s: 'float' = 5.0, stream_emit_interval_ms: 'int' = 50, event_queue_high_water: 'int' = 1000, traffic_ring_size: 'int' = 1000, hex_truncate_bytes: 'int' = 64, resend_idempotent: 'bool' = False, queue_while_reconnecting: 'bool' = False, reconnect_initial_s: 'float' = 0.5, reconnect_max_s: 'float' = 10.0, reconnect_max_attempts: 'int | None' = None, reprobe_on_reconnect: 'bool' = True, hotplug_poll_s: 'float' = 1.5, probe_pool_size: 'int' = 4, probe_total_timeout_s: 'float' = 30.0) -> None"
+        "__init__": "(self, min_command_interval_s: 'float' = 0.0, queue_limit: 'int' = 256, post_timeout_drain_s: 'float' = 0.2, rto_min_s: 'float' = 0.05, rto_max_s: 'float' = 5.0, stream_emit_interval_ms: 'int' = 50, event_queue_high_water: 'int' = 1000, traffic_ring_size: 'int' = 1000, hex_truncate_bytes: 'int' = 64, resend_idempotent: 'bool' = False, queue_while_reconnecting: 'bool' = False, reconnect_initial_s: 'float' = 0.5, reconnect_max_s: 'float' = 10.0, reconnect_max_attempts: 'int | None' = None, reprobe_on_reconnect: 'bool' = True, hotplug_poll_s: 'float' = 1.5, probe_pool_size: 'int' = 4, probe_total_timeout_s: 'float' = 30.0, probe_open_timeout_s: 'float' = 1.0, probe_activity_window_s: 'float' = 0.3) -> None"
       },
       "properties": {},
       "signals": {},
@@ -1182,6 +1192,16 @@
           "name": "probe_total_timeout_s",
           "type": "float",
           "kw_only": false
+        },
+        {
+          "name": "probe_open_timeout_s",
+          "type": "float",
+          "kw_only": false
+        },
+        {
+          "name": "probe_activity_window_s",
+          "type": "float",
+          "kw_only": false
         }
       ]
     },
@@ -1241,6 +1261,40 @@
       "properties": {
         "done": "(self) -> 'bool'",
         "callback_expired": "(self) -> 'bool'",
+        "exception": "(self) -> 'Exception | None'",
+        "callback_exception": "(self) -> 'Exception | None'"
+      },
+      "signals": {},
+      "attributes": {}
+    },
+    "serialforge.advanced.ScanCall": {
+      "overloads": {},
+      "methods": {
+        "__init__": "(self, *, dispatch: 'Callable[[Callable[[], None]], None]', cancel: 'Callable[[], None]') -> 'None'",
+        "add_done_callback": "(self, callback: 'Callable[[list[DeviceInfo]], None]', /) -> 'Self'",
+        "result": "(self) -> 'list[DeviceInfo]'",
+        "cancel": "(self) -> 'None'"
+      },
+      "properties": {
+        "done": "(self) -> 'bool'",
+        "cancelled": "(self) -> 'bool'",
+        "exception": "(self) -> 'Exception | None'",
+        "callback_exception": "(self) -> 'Exception | None'"
+      },
+      "signals": {},
+      "attributes": {}
+    },
+    "serialforge.advanced.ConnectCall": {
+      "overloads": {},
+      "methods": {
+        "__init__": "(self, *, dispatch: 'Callable[[Callable[[], None]], None]', cancel: 'Callable[[], None]') -> 'None'",
+        "add_done_callback": "(self, callback: 'Callable[[DeviceInfo], None]', /) -> 'Self'",
+        "result": "(self) -> 'DeviceInfo'",
+        "cancel": "(self) -> 'None'"
+      },
+      "properties": {
+        "done": "(self) -> 'bool'",
+        "cancelled": "(self) -> 'bool'",
         "exception": "(self) -> 'Exception | None'",
         "callback_exception": "(self) -> 'Exception | None'"
       },

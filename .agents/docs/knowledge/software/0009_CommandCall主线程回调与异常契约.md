@@ -105,7 +105,7 @@ Qt queued 投递在接收对象线程执行，见 [Qt QObject 官方说明](http
 | 场景 | 传播方式 | 是否执行 add_done_callback |
 | --- | --- | --- |
 | 参数/配置/未注册声明错误 | send/configure/add 等调用点直接 raise | 否，无有效调用 |
-| scan/connect/disconnect 内部错误 | 阻塞方法等待内部线程并在调用线程 raise | 不适用 |
+| scan_sync/scan_async/connect_sync/connect_async/disconnect 内部错误 | 阻塞方法等待内部线程并在调用线程 raise | 不适用 |
 | 同步设备报错/解析失败/断线/忙/超时/取消 | send_sync 直接 raise 对应异常 | 不适用 |
 | 异步命令错误/超时/取消 | 调用对象保存异常，result() 重抛 | 否 |
 | 尚未完成时读取 result() | CommandNotReadyError，不阻塞 | 不改变已注册闭包 |

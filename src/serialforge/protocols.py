@@ -44,6 +44,9 @@ class TransportProtocol(Protocol):
     def reset_input_buffer(self) -> None:
         """Discard stale input after a command timeout."""
 
+    def set_baudrate(self, baudrate: int) -> None:
+        """Change the rate of an already open handle."""
+
     def set_buffer_size(self, rx_size: int) -> None:
         """Request a driver receive buffer size when supported."""
 

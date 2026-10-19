@@ -3,7 +3,7 @@
 本示例只写 serialforge 的事：建 Qt 应用、拼 ``DeviceProfile``、用门面声明命令、
 连接、发指令、收信号。虚拟设备与它的指令集（Version / Hello / ReadAll /
 Dump / Monitor / Stop / Report / SetGain / Status / TEMP / ALARM）见
-``examples/virtual_device.py``；真机换成 ``forge.connect("COM11")`` 即可。
+``examples/virtual_device.py``；真机换成 ``forge.connect_sync("COM11")`` 即可。
 
 覆盖的五种取信息方式：
 
@@ -109,7 +109,7 @@ class QuickStartDemo:
             try:
                 # 阻塞式连接：返回时设备已经打开并初始化好，可以直接发送。
                 # 失败（没找到设备、端口被占用等）会同步抛 SerialForgeError。
-                self._forge.connect()
+                self._forge.connect_sync()
                 print(f"[连接] {self._forge.state.value}")
                 self._demo_single()
                 self._demo_multi()

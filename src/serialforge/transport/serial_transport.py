@@ -63,6 +63,10 @@ class SerialTransport:
         """Discard queued input after an exclusive command timeout."""
         self._require_connection().reset_input_buffer()
 
+    def set_baudrate(self, baudrate: int) -> None:
+        """Reconfigure the open handle without closing the port."""
+        self._require_connection().baudrate = baudrate
+
     def set_buffer_size(self, rx_size: int) -> None:
         """Request a driver receive buffer size."""
         connection = self._require_connection()

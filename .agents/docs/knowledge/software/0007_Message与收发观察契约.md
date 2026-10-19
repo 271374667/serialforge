@@ -11,7 +11,7 @@ class Message(Generic[T]):
     """携带协议数据、调用结果或原始接收字节；category 标识消息用途。"""
     category: MessageCategory
     timestamp: float                         # monotonic 秒
-    data: T | list[T] | None = None           # 业务对象；可能确实没有数据
+    data: list[T] = field(default_factory=list) # 单条响应也是一个单元素列表；无数据为空列表
     spec: Spec[T] | None = None               # 声明对象；未知帧/RAW 可以没有
     request_id: str = ""                      # 没有调用关联
     raw_frames: tuple[bytes, ...] = ()        # 定界后的帧，不含结束标记
@@ -36,11 +36,11 @@ class Message(Generic[T]):
 | category | spec/request_id/context | 有效载荷 | 用途 |
 | --- | --- | --- | --- |
 | RAW_RECEIVE | None / "" / 空映射 | LINE 的非空完整行，保留接收结束符；非行模式为非空 read 字节 | 滚动 RX 原始日志，解析观察前发出 |
-| RESPONSE_FRAME | 对应命令/ID/context | 单个匹配帧和解析值 | 内部解析；raw_data 为空不通过 received 发布 |
-| COMMAND_RESULT | 原命令或 RAW 的 None / 调用 ID / context | SINGLE 单值、MULTI 列表或无回复 None | 同步返回、调用句柄、异步完成回调 |
-| DEVICE_EVENT | 原事件 / "" / 空映射 | 单帧解析值 | 内部解析；raw_data 为空不通过 received 发布 |
-| STREAM_FRAME | 原 STREAM 命令 / 调用 ID / context | 当前流帧 | 内部解析；raw_data 为空不通过 received 发布 |
-| UNKNOWN_FRAME | None / "" / 空映射 | 帧解码原文 | 内部解析；raw_data 为空不通过 received 发布 |
+| RESPONSE_FRAME | 对应命令/ID/context | 单个匹配帧和解析值（单元素列表） | 内部解析；raw_data 为空不通过 received 发布 |
+| COMMAND_RESULT | 原命令或 RAW 的 None / 调用 ID / context | SINGLE 和 MULTI 都是列表；无回复为空列表 | 同步返回、调用句柄、异步完成回调 |
+| DEVICE_EVENT | 原事件 / "" / 空映射 | 单帧解析值（单元素列表） | 内部解析；raw_data 为空不通过 received 发布 |
+| STREAM_FRAME | 原 STREAM 命令 / 调用 ID / context | 当前流帧（单元素列表） | 内部解析；raw_data 为空不通过 received 发布 |
+| UNKNOWN_FRAME | None / "" / 空映射 | 帧解码原文（单元素列表） | 内部解析；raw_data 为空不通过 received 发布 |
 
 用户 2026-10-10 要求 received 过滤空内容并按完整行发出，覆盖此前 RAW_RECEIVE 逐 read 转发的约定。LINE 模式先缓存分片，遇到接收结束符后逐行发布 RAW_RECEIVE，保留原结束符；空 read 和只有结束符的空行不发布，未完成的行继续等待。接收结束符取显式 FramingConfig.terminator，否则取 profile.terminator 按 encoding 编码，独立于发送定界配置。
 
@@ -52,7 +52,7 @@ COMMAND_RESULT 即使无设备回复也可能产生，例如 NO_REPLY 写入成�
 
 收到的每条 received 都能直接打印 raw_data，无需后处理过滤。用户 temp/0005真机测试/U987demo1.py 恢复原样，用原打印函数连接信号即可观察非空完整行。
 
-params/context 只读，业务 data 不承诺递归不可变。Message 的对象字段可以 None，值字段保持字符串/枚举/数值/集合类型。
+params/context 只读，业务 data 不承诺递归不可变。Message.data 在构造边界统一为列表：标量包装为单元素列表，MULTI 保留原列表，无回复使用空列表；列表元素仍保持声明的 result_type（字符串、枚举、数值或对象）。
 
 ## 8. 信号收敛与 traffic_logged 说明
 
@@ -70,7 +70,7 @@ class SerialForge(QObject):
 - 所有扫描探测、初始化、心跳、重试、RAW 和业务命令的实际串口写入也纳入 raw_sent。扫描临时端口的数据同样纳入 RAW_RECEIVE；并行扫描下裸 bytes 无端口信息，跨端口归属不保证，若以后需要精确多端口日志须另评审带端口元信息的发送载荷。
 - 门面内部主线程桥接统一派发 received/raw_sent，普通闭包消费也在主线程；信号记录包含观察时间而非保证纳秒级物理线序，多端口并发没有全局物理先后顺序。
 - 物理接收字节和原始发送信号独立于日志配置，不能为了启用滚动控件而被迫开启文件/loguru 输出。
-- 删除 scan_finished、scan_progress、error_occurred、traffic_logged，不提供隐含的第二套完成/错误信号。扫描由应用自建工作线程调用 scan，获取返回列表或捕获异常。
+- 删除 scan_finished、scan_progress、error_occurred、traffic_logged，不提供隐含的第二套完成/错误信号。扫描用 `scan_sync` 或 `scan_async`，结果分别经返回值或调用句柄回调交付。
 - 主线程事件循环未运行时，queued 观察不保证即时交付；同步 API 仍可独立工作。
 
 除用户要求的 LINE 分片缓存、空行过滤与会话结束时丢弃半行，原字节观察在库侧不节流，界面端应自行批量滚动显示。传输/调度线程不得因 GUI 显示阻塞；高吞吐场景需验证 Qt 事件队列内存。若以后加入有损限流必须显式配置并提供丢弃计数。

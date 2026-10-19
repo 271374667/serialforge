@@ -9,6 +9,7 @@ from __future__ import annotations
 
 # Lazy advanced re-exports avoid definition/implementation cycles.
 # pylint: disable=import-outside-toplevel
+import math
 import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -30,6 +31,8 @@ from serialforge.errors import ConfigError
 
 if TYPE_CHECKING:
     from serialforge.connection.command_call import CommandCall
+    from serialforge.connection.connect_call import ConnectCall
+    from serialforge.connection.scan_call import ScanCall
     from serialforge.discovery.device_finder import DeviceFinder
     from serialforge.enums import SpecRole
     from serialforge.models import DeviceProfile, LogConfig
@@ -228,6 +231,12 @@ class RuntimeConfig:
         hotplug_poll_s: Positive delay between absent-device scans, in seconds.
         probe_pool_size: Positive maximum concurrently probed ports.
         probe_total_timeout_s: Positive total discovery deadline in seconds.
+        probe_open_timeout_s: Positive budget for one port open call; a stuck
+            driver is abandoned and the port is skipped.
+        probe_activity_window_s: Non-negative seconds that screen a rate for
+            any reply byte before waiting for the full probe timeout; 0
+            disables the screen.  Only devices that answer at any baudrate
+            benefit.
     """
 
     min_command_interval_s: float = 0.0
@@ -248,6 +257,8 @@ class RuntimeConfig:
     hotplug_poll_s: float = 1.5
     probe_pool_size: int = 4
     probe_total_timeout_s: float = 30.0
+    probe_open_timeout_s: float = 1.0
+    probe_activity_window_s: float = 0.3
 
     def __post_init__(self) -> None:
         """Validate runtime limits and timeout ranges."""
@@ -278,6 +289,21 @@ class RuntimeConfig:
             )
         if self.probe_total_timeout_s <= 0:
             raise ConfigError("probe_total_timeout_s must be positive")
+        if (
+            type(self.probe_open_timeout_s) not in (int, float)
+            or not math.isfinite(self.probe_open_timeout_s)
+            or self.probe_open_timeout_s <= 0
+        ):
+            raise ConfigError("probe_open_timeout_s must be positive seconds")
+        window = self.probe_activity_window_s
+        if (
+            type(window) not in (int, float)
+            or not math.isfinite(window)
+            or window < 0
+        ):
+            raise ConfigError(
+                "probe_activity_window_s must be non-negative seconds"
+            )
 
 
 @dataclass(frozen=True)
@@ -393,6 +419,14 @@ def __getattr__(name: str) -> Any:
         from serialforge.connection.command_call import CommandCall
 
         return CommandCall
+    if name == "ScanCall":
+        from serialforge.connection.scan_call import ScanCall
+
+        return ScanCall
+    if name == "ConnectCall":
+        from serialforge.connection.connect_call import ConnectCall
+
+        return ConnectCall
     if name == "SpecRole":
         from serialforge.enums import SpecRole
 
@@ -410,6 +444,8 @@ def __getattr__(name: str) -> Any:
 
 __all__ += [
     "CommandCall",
+    "ScanCall",
+    "ConnectCall",
     "SpecRole",
     "DeviceProfile",
     "LogConfig",

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
+from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
@@ -20,7 +21,8 @@ from serialforge.advanced import FramingConfig, RuntimeConfig, SerialConfig
 from serialforge.discovery import DeviceFinder
 from serialforge.discovery.baud_cache import BaudCache
 from serialforge.enums import FramingMode
-from serialforge.errors import ProbeError
+from serialforge.errors import ConfigError, ProbeError
+from serialforge.protocols import TransportProtocol
 from serialforge.qt_core import QCoreApplication, Qt
 from serialforge.transport import PortRegistry
 from tests.support import FakeBackend, SimulatedDevice, use_fake_backend
@@ -197,6 +199,8 @@ def test_probe_rates_are_serial_and_stop_at_first_valid_reply() -> None:
         results = finder.find()
         assert results[0].baudrate == 115200
         assert [rate for _, rate, _ in backend.attempts] == [9600, 115200]
+        # One handle serves both rates; the port is opened only once.
+        assert len(backend.transports) == 1
         assert backend.overlapping_ports == []
         assert all(tid != caller_thread for tid in backend.enumeration_threads)
         assert all(tid != caller_thread for _, _, tid in backend.attempts)
@@ -361,6 +365,149 @@ def test_missing_whitelist_scans_all_ports_and_validates_reply() -> None:
             "WRONG",
         }
         assert all(item.closed for item in backend.transports)
+
+
+def test_failing_ports_are_skipped_without_failing_the_scan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Skip a port that cannot be opened and still report the other match."""
+    app()
+    backend = FakeBackend(
+        [
+            SimulatedDevice(0x067B, 0x23A3, port="BROKEN"),
+            SimulatedDevice(
+                0x067B,
+                0x23A3,
+                port="WORKING",
+                baudrate=115200,
+                responses={b"Version\r\n": b"Software version 1.75"},
+            ),
+        ]
+    )
+    open_port = backend.open
+
+    def open_or_fail(
+        port: str, params: Mapping[str, object]
+    ) -> TransportProtocol:
+        if port == "BROKEN":
+            raise OSError("cannot open")
+        return open_port(port, params)
+
+    monkeypatch.setattr(backend, "open", open_or_fail)
+    with use_fake_backend(backend):
+        finder = DeviceFinder(replace(profile(), baudrates=[115200]))
+        results = finder.find()
+        assert [item.port for item in results] == ["WORKING"]
+        assert all(item.closed for item in backend.transports)
+        assert not PortRegistry.is_owned("BROKEN")
+        assert not PortRegistry.is_owned("WORKING")
+
+
+def test_all_ports_failing_returns_empty_list(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Report no match when every candidate port is unusable."""
+    app()
+    backend = FakeBackend([SimulatedDevice(0x067B, 0x23A3, port="BROKEN")])
+
+    def fail_open(port: str, params: Mapping[str, object]) -> TransportProtocol:
+        raise OSError("cannot open")
+
+    monkeypatch.setattr(backend, "open", fail_open)
+    with use_fake_backend(backend):
+        finder = DeviceFinder(replace(profile(), baudrates=[115200]))
+        assert finder.find() == []
+        assert backend.transports == []
+
+
+def test_slow_open_is_abandoned_and_late_handle_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Bound one open by probe_open_timeout_s and clean up the late handle."""
+    app()
+    backend = FakeBackend([SimulatedDevice(0x067B, 0x23A3, port="SLOWOPEN")])
+    open_port = backend.open
+
+    def open_late(port: str, params: Mapping[str, object]) -> TransportProtocol:
+        time.sleep(0.4)
+        return open_port(port, params)
+
+    monkeypatch.setattr(backend, "open", open_late)
+    with use_fake_backend(backend):
+        finder = DeviceFinder(
+            replace(
+                profile(),
+                baudrates=[115200],
+                runtime=RuntimeConfig(
+                    probe_total_timeout_s=2,
+                    probe_open_timeout_s=0.1,
+                ),
+            )
+        )
+        started = time.monotonic()
+        assert finder.find() == []
+        assert time.monotonic() - started < 0.35
+        deadline = time.monotonic() + 2
+        while not (
+            backend.transports
+            and backend.transports[-1].closed
+            and not PortRegistry.is_owned("SLOWOPEN")
+        ):
+            assert time.monotonic() < deadline
+            time.sleep(0.02)
+        assert len(backend.transports) == 1
+        assert backend.transports[-1].closed
+
+
+def test_activity_window_stops_silent_rates_early() -> None:
+    """Skip a rate with no reply bytes instead of waiting for the timeout."""
+    app()
+    device = SimulatedDevice(
+        0x067B,
+        0x23A3,
+        port="ACTIVITY",
+        baudrate=115200,
+        garbage_on_baud_mismatch=False,
+        responses={b"Version\r\n": b"Software version 1.75"},
+    )
+    backend = FakeBackend([device])
+    with use_fake_backend(backend):
+        finder = DeviceFinder(
+            replace(
+                profile(),
+                baudrates=[9600, 115200],
+                probe=CommandSpec("Version", VERSION.pattern, timeout_s=1.0),
+                runtime=RuntimeConfig(
+                    probe_open_timeout_s=0.5,
+                    probe_activity_window_s=0.1,
+                    probe_total_timeout_s=3,
+                ),
+            )
+        )
+        started = time.monotonic()
+        results = finder.find()
+        elapsed = time.monotonic() - started
+        assert results[0].baudrate == 115200
+        assert elapsed < 0.8
+        assert len(backend.transports) == 1
+        assert all(item.closed for item in backend.transports)
+
+
+@pytest.mark.parametrize(
+    "build",
+    [
+        lambda: RuntimeConfig(probe_open_timeout_s=0),
+        lambda: RuntimeConfig(probe_open_timeout_s=float("nan")),
+        lambda: RuntimeConfig(probe_activity_window_s=-0.1),
+        lambda: RuntimeConfig(probe_activity_window_s=float("inf")),
+    ],
+)
+def test_probe_budget_validation(
+    build: Callable[[], RuntimeConfig],
+) -> None:
+    """Reject invalid open budgets and activity windows at construction."""
+    with pytest.raises(ConfigError):
+        build()
 
 
 @pytest.mark.parametrize(

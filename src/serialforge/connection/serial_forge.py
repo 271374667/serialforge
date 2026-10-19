@@ -26,7 +26,9 @@ from serialforge.advanced import (
 )
 from serialforge.connection.command_call import CommandCall
 from serialforge.connection.command_registry import CommandRegistry
+from serialforge.connection.connect_call import ConnectCall
 from serialforge.connection.handler_core import HandlerCore
+from serialforge.connection.scan_call import ScanCall
 from serialforge.discovery.device_finder import DeviceFinder
 from serialforge.enums import (
     ConnectionState,
@@ -43,6 +45,7 @@ from serialforge.errors import (
     CommandError,
     ConfigError,
     FramingError,
+    SerialForgeError,
     _without_tracebacks,
 )
 from serialforge.message import Message
@@ -78,9 +81,10 @@ class SerialForge(QObject):
     Create on the Qt application's main thread. application="core" creates a
     retained QCoreApplication for scripts; callers still own its event loop.
     Configure with a DeviceProfile or plain fields, then add declarations and
-    connect. scan/connect/send_sync block their caller and may run in an
-    application worker. received/raw_sent and done callbacks are queued on the
-    main thread. Only QtCore is imported.
+    connect. scan_sync/connect_sync/send_sync block their caller and may run
+    in an application worker; scan_async/connect_async return call handles
+    with main-thread callbacks. received/raw_sent and done callbacks are
+    queued on the main thread. Only QtCore is imported.
 
     Attributes:
         received: Message with nonempty raw_data, using complete LINE reads.
@@ -133,6 +137,12 @@ class SerialForge(QObject):
         self._submitting: int = 0
         self._scan_done: threading.Event = threading.Event()
         self._scan_done.set()
+        self._async_scan: ScanCall | None = None
+        self._async_scan_active: bool = False
+        self._async_thread: threading.Thread | None = None
+        self._async_connect: ConnectCall | None = None
+        self._async_connect_active: bool = False
+        self._async_connect_thread: threading.Thread | None = None
         self._callback_calls: weakref.WeakSet[CommandCall[Any]] = (
             weakref.WeakSet()
         )
@@ -391,6 +401,15 @@ class SerialForge(QObject):
             if (
                 self._scanning
                 or self._connecting
+                or (
+                    self._async_scan_active
+                    and threading.current_thread() is not self._async_thread
+                )
+                or (
+                    self._async_connect_active
+                    and threading.current_thread()
+                    is not self._async_connect_thread
+                )
                 or self._calls
                 or self._submitting
                 or (
@@ -544,12 +563,152 @@ class SerialForge(QObject):
             self._registry.unregister(spec)
 
     @overload
-    def scan(
+    def scan_async(
+        self, /, *, mode: ScanMode = ScanMode.ALL, port: str = ""
+    ) -> ScanCall: ...
+
+    @overload
+    def scan_async(
+        self,
+        profile: DeviceProfile,
+        /,
+        *,
+        mode: ScanMode = ScanMode.ALL,
+        port: str = "",
+    ) -> ScanCall: ...
+
+    @overload
+    def scan_async(
+        self,
+        /,
+        *,
+        mode: ScanMode = ScanMode.ALL,
+        port: str = "",
+        baudrates: Sequence[int],
+        probe: Spec[Any] | ProbeSpec,
+        vid_pid: Sequence[tuple[int, int]] = (),
+        name: str = "",
+        terminator: str = "\r\n",
+        encoding: str = "utf-8",
+        echo: bool = False,
+        heartbeat_s: float = -1.0,
+        serial: SerialConfig | None = None,
+        framing: FramingConfig | None = None,
+        runtime: RuntimeConfig | None = None,
+    ) -> ScanCall: ...
+
+    @overload
+    def scan_async(
+        self,
+        /,
+        *,
+        mode: ScanMode = ScanMode.ALL,
+        port: str = "",
+        baudrates: Sequence[int],
+        probe: str,
+        probe_pattern: str,
+        probe_timeout_s: float = 1.0,
+        vid_pid: Sequence[tuple[int, int]] = (),
+        name: str = "",
+        terminator: str = "\r\n",
+        encoding: str = "utf-8",
+        echo: bool = False,
+        heartbeat_s: float = -1.0,
+        serial: SerialConfig | None = None,
+        framing: FramingConfig | None = None,
+        runtime: RuntimeConfig | None = None,
+    ) -> ScanCall: ...
+
+    def scan_async(
+        self,
+        profile: DeviceProfile | None = None,
+        /,
+        *,
+        mode: ScanMode = ScanMode.ALL,
+        port: str = "",
+        **fields: Any,
+    ) -> ScanCall:
+        """Start a scan in a worker thread and return its call handle.
+
+        The worker first disconnects the current session, exactly like
+        scan_sync, so a connected facade can be rescanned directly.
+        add_done_callback closures receive the discovered list[DeviceInfo] on
+        the Qt main thread, so the caller never blocks. Failures never run a
+        success closure and are raised by result(). There is no extra delivery
+        deadline; the scan's own probe budget bounds it. cancel() requests
+        cancellation and suppresses callbacks; result() then returns the
+        matches completed so far.
+        """
+        with self._lock:
+            if (
+                self._scanning
+                or self._connecting
+                or self._async_scan_active
+                or self._async_connect_active
+            ):
+                raise ConfigError("scan or connection is already active")
+            if profile is None and not fields and self._profile is None:
+                raise ConfigError("configure before scanning")
+            call = ScanCall(dispatch=self._dispatch, cancel=self.cancel_scan)
+            self._async_scan = call
+            self._async_scan_active = True
+            options = dict(fields)
+
+            def run_scan() -> None:
+                error: Exception | None = None
+                devices: list[DeviceInfo] = []
+                try:
+                    devices = self._scan_request(
+                        profile,
+                        mode,
+                        port,
+                        options,
+                        cancel_event=call._cancel_event,
+                    )
+                except BaseException as exc:  # pylint: disable=broad-exception-caught
+                    error = (
+                        exc
+                        if isinstance(exc, Exception)
+                        else RuntimeError(str(exc))
+                    )
+                # Release the facade before callbacks are queued so a closure
+                # may start the next operation (connect/scan) directly.
+                with self._lock:
+                    self._async_scan_active = False
+                try:
+                    if error is not None:
+                        call._fail(error)
+                    else:
+                        call._complete(devices)
+                finally:
+                    with self._lock:
+                        if self._async_scan is call:
+                            self._async_scan = None
+                            self._async_thread = None
+
+            thread = threading.Thread(
+                target=run_scan,
+                name="serialforge-scan",
+                daemon=False,
+            )
+            self._async_thread = thread
+        try:
+            thread.start()
+        except BaseException:
+            with self._lock:
+                self._async_scan = None
+                self._async_scan_active = False
+                self._async_thread = None
+            raise
+        return call
+
+    @overload
+    def scan_sync(
         self, /, *, mode: ScanMode = ScanMode.ALL, port: str = ""
     ) -> list[DeviceInfo]: ...
 
     @overload
-    def scan(
+    def scan_sync(
         self,
         profile: DeviceProfile,
         /,
@@ -559,7 +718,7 @@ class SerialForge(QObject):
     ) -> list[DeviceInfo]: ...
 
     @overload
-    def scan(
+    def scan_sync(
         self,
         /,
         *,
@@ -579,7 +738,7 @@ class SerialForge(QObject):
     ) -> list[DeviceInfo]: ...
 
     @overload
-    def scan(
+    def scan_sync(
         self,
         /,
         *,
@@ -600,7 +759,7 @@ class SerialForge(QObject):
         runtime: RuntimeConfig | None = None,
     ) -> list[DeviceInfo]: ...
 
-    def scan(
+    def scan_sync(
         self,
         profile: DeviceProfile | None = None,
         /,
@@ -612,14 +771,40 @@ class SerialForge(QObject):
         """Disconnect, apply optional configuration, then scan for devices.
 
         Returns discovered devices and never connects them automatically.
-        Run in your own worker for a responsive UI. Raw probe traffic uses the
-        same two observation signals; TX bytes do not identify concurrent ports.
+        Ports and rates that cannot be opened, written or responded are
+        skipped, so no match returns an empty list instead of raising; only
+        invalid configuration or concurrent misuse raises. Use scan_async
+        for a main-thread callback instead of blocking. Raw probe traffic
+        uses the same two observation signals; TX bytes do not identify
+        concurrent ports.
         """
+        return self._scan_request(profile, mode, port, dict(fields))
+
+    def _scan_request(
+        self,
+        profile: DeviceProfile | None,
+        mode: ScanMode,
+        port: str,
+        fields: dict[str, Any],
+        *,
+        cancel_event: threading.Event | None = None,
+    ) -> list[DeviceInfo]:
+        """Run one blocking scan after reserving the facade lifecycle."""
+        async_worker = threading.current_thread() is self._async_thread
         with self._lock:
-            if self._scanning or self._connecting:
+            if (
+                self._scanning
+                or self._connecting
+                or (self._async_scan_active and not async_worker)
+                or self._async_connect_active
+            ):
                 raise ConfigError("scan or connection is already active")
             # Reserve lifecycle changes while stopping outside the facade lock.
             self._connecting = True
+        if cancel_event is not None and cancel_event.is_set():
+            with self._lock:
+                self._connecting = False
+            return []
         try:
             self.disconnect()
         except BaseException:
@@ -638,12 +823,13 @@ class SerialForge(QObject):
             if (
                 self._scanning
                 or self._connecting
+                or (self._async_scan_active and not async_worker)
+                or self._async_connect_active
                 or self.state
                 not in (ConnectionState.DISCONNECTED, ConnectionState.FAILED)
             ):
                 raise ConfigError("scan requires a disconnected idle facade")
             finder = DeviceFinder(self._profile)
-            finder._strict_errors = True
             finder._preserve_cancel = True
             finder._raw_received = self._on_raw_receive
             finder._raw_sent = self._on_raw_sent
@@ -651,6 +837,8 @@ class SerialForge(QObject):
             self._receive_splitters.clear()
             self._scanning = True
             self._scan_done.clear()
+        if cancel_event is not None and cancel_event.is_set():
+            finder.cancel()
         try:
             return finder.find(mode, port=port or None)
         finally:
@@ -666,25 +854,128 @@ class SerialForge(QObject):
             if self._finder is not None:
                 self._finder.cancel()
 
-        # ty: ignore[invalid-method-override, missing-override-decorator]
-
-    def connect(self, target: str | DeviceInfo = "") -> None:
+    def connect_sync(self, target: str | DeviceInfo = "") -> None:
         """Close the previous session, then block until the target is ready.
 
         Even the same target starts a fresh connection and initialization.
         Pending calls and callbacks are cancelled before opening the target.
+        Use connect_async for a main-thread callback instead of blocking.
+        """
+        self._connect_request(target or None)
+
+    def connect_async(self, target: str | DeviceInfo = "") -> ConnectCall:
+        """Start a connection in a worker thread and return its call handle.
+
+        The worker first disconnects the current session, exactly like
+        connect_sync. add_done_callback closures receive the connected
+        DeviceInfo on the Qt main thread, so the caller never blocks. Failures
+        never run a success closure and are raised by result(). cancel()
+        stops a pending attempt and suppresses callbacks.
         """
         with self._lock:
+            self._require_core()
+            if (
+                self._scanning
+                or self._connecting
+                or self._async_scan_active
+                or self._async_connect_active
+            ):
+                raise ConfigError("scan or connection is already active")
+            call = ConnectCall(
+                dispatch=self._dispatch,
+                cancel=self._cancel_pending_connect,
+            )
+            self._async_connect = call
+            self._async_connect_active = True
+            resolved = target or None
+
+            def run_connect() -> None:
+                error: Exception | None = None
+                device: DeviceInfo | None = None
+                try:
+                    device = self._connect_request(
+                        resolved,
+                        cancel_event=call._cancel_event,
+                    )
+                except BaseException as exc:  # pylint: disable=broad-exception-caught
+                    error = (
+                        exc
+                        if isinstance(exc, Exception)
+                        else RuntimeError(str(exc))
+                    )
+                # Release the facade before callbacks are queued so a closure
+                # may start the next operation directly.
+                with self._lock:
+                    self._async_connect_active = False
+                try:
+                    if error is not None:
+                        call._fail(error)
+                    elif device is not None:
+                        call._complete(device)
+                finally:
+                    with self._lock:
+                        if self._async_connect is call:
+                            self._async_connect = None
+                            self._async_connect_thread = None
+
+            thread = threading.Thread(
+                target=run_connect,
+                name="serialforge-connect",
+                daemon=False,
+            )
+            self._async_connect_thread = thread
+        try:
+            thread.start()
+        except BaseException:
+            with self._lock:
+                self._async_connect = None
+                self._async_connect_active = False
+                self._async_connect_thread = None
+            raise
+        return call
+
+    def _connect_request(
+        self,
+        target: str | DeviceInfo | None,
+        *,
+        cancel_event: threading.Event | None = None,
+    ) -> DeviceInfo:
+        """Run one blocking connection after reserving the facade lifecycle."""
+        async_worker = threading.current_thread() is self._async_connect_thread
+        with self._lock:
             core = self._require_core()
-            if self._scanning or self._connecting:
+            if (
+                self._scanning
+                or self._connecting
+                or self._async_scan_active
+                or (self._async_connect_active and not async_worker)
+            ):
                 raise ConfigError("scan or connection is already active")
             self._connecting = True
+        if cancel_event is not None and cancel_event.is_set():
+            with self._lock:
+                self._connecting = False
+            raise SerialForgeError("connection attempt was cancelled")
         try:
             self.disconnect()
-            core.connect(target or None)
+            if cancel_event is not None and cancel_event.is_set():
+                raise SerialForgeError("connection attempt was cancelled")
+            core.connect(target)
         finally:
             with self._lock:
                 self._connecting = False
+        device = getattr(core._worker, "_device", None)
+        if isinstance(device, DeviceInfo):
+            return device
+        if isinstance(target, DeviceInfo):
+            return target
+        raise SerialForgeError("connection completed without a device")
+
+    def _cancel_pending_connect(self) -> None:
+        """Stop a pending connection attempt from another thread."""
+        core = self._core
+        if core is not None:
+            core.disconnect()
 
         # ty: ignore[invalid-method-override, missing-override-decorator]
 
@@ -692,8 +983,20 @@ class SerialForge(QObject):
         """Cancel scans and commands and join serial workers; safely
         repeatable.
         """
+        current = threading.current_thread()
+        with self._lock:
+            scan_call = self._async_scan
+            connect_call = self._async_connect
         self.cancel_scan()
         self._scan_done.wait()
+        if current is not self._async_thread and scan_call is not None:
+            scan_call.cancel()
+            scan_call._done_event.wait()
+        if (
+            connect_call is not None
+            and current is not self._async_connect_thread
+        ):
+            connect_call.cancel()
         with self._lock:
             calls = tuple(self._callback_calls)
         for call in calls:
@@ -701,6 +1004,11 @@ class SerialForge(QObject):
         core = self._core
         if core is not None:
             core.disconnect()
+        if (
+            connect_call is not None
+            and current is not self._async_connect_thread
+        ):
+            connect_call._done_event.wait()
         with self._lock:
             self._receive_splitters.clear()
 

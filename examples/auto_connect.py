@@ -7,7 +7,7 @@
 
 1. ``DeviceProfile`` 上每个参数分别管什么（VID/PID、候选波特率、探测命令、超时）
 2. VID/PID 可以省略：省略时不筛 USB 身份，全部串口都会被探测，靠回复确认设备
-3. ``SerialForge.scan()`` 的 ``ALL`` 与 ``FIRST_MATCH`` 两种完成策略
+3. ``SerialForge.scan_sync()`` 的 ``ALL`` 与 ``FIRST_MATCH`` 两种完成策略
 4. 三种 ``connect()`` 入口：无参全自动 / 只给端口名 / 给已探测的 ``DeviceInfo``
 
 门面没有扫描完成或进度信号：扫描结果由 ``scan()`` 的返回值给出。虚拟设备（含一台
@@ -106,7 +106,7 @@ class AutoConnectDemo:
     ) -> list[DeviceInfo]:
         """跑一次阻塞扫描并打印结果；结果只从返回值来。"""
         print(f"\n=== 阻塞扫描：{title} ===")
-        found = self._forge.scan(profile, mode=mode)
+        found = self._forge.scan_sync(profile, mode=mode)
         # scan 用收到的 profile 配置门面；这里恢复本示例的主 profile。
         self._forge.configure(self._profile)
         print(f"  找到 {[item.port for item in found]}")
@@ -117,7 +117,7 @@ class AutoConnectDemo:
         print(f"\n=== 连接入口：{self._describe(target)} ===")
         try:
             # 阻塞式连接：返回时设备已打开并初始化完成，可以立刻发命令。
-            self._forge.connect(target or "")
+            self._forge.connect_sync(target or "")
             print(f"  已连接，状态={self._forge.state.value}")
             # send_sync 同样阻塞：返回的就是最终 Message，失败会抛异常。
             result = self._forge.send_sync(HELLO)

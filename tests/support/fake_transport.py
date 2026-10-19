@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from collections import deque
+from collections.abc import Callable
 from threading import Condition
 
 from tests.support.simulated_device import SimulatedDevice
@@ -27,6 +28,7 @@ class FakeTransport:
         self._cancelled_read = False
         self._cancelled_write = False
         self._write_count = 0
+        self.on_baudrate: Callable[[int], None] | None = None
 
     @property
     def closed(self) -> bool:
@@ -76,12 +78,16 @@ class FakeTransport:
             raise OSError("simulated disconnect")
         if self._device.latency_s > 0:
             time.sleep(self._device.latency_s)
-        chunks = (
-            self._device.response_for(bytes(data))
-            if self._device.baudrate is None
-            or self._device.baudrate == self._baudrate
-            else [b"\x00"]
+        mismatch = (
+            self._device.baudrate is not None
+            and self._device.baudrate != self._baudrate
         )
+        if mismatch and not self._device.garbage_on_baud_mismatch:
+            chunks = []
+        elif mismatch:
+            chunks = [b"\x00"]
+        else:
+            chunks = self._device.response_for(bytes(data))
         with self._condition:
             self._incoming.extend(chunks)
             self._condition.notify_all()
@@ -113,6 +119,13 @@ class FakeTransport:
         """Discard pending fake response chunks."""
         with self._condition:
             self._incoming.clear()
+
+    def set_baudrate(self, baudrate: int) -> None:
+        """Switch the simulated rate and notify an interested recorder."""
+        self._baudrate = baudrate
+        observer = self.on_baudrate
+        if observer is not None:
+            observer(baudrate)
 
     def set_buffer_size(self, rx_size: int) -> None:
         """Accept a simulated driver receive buffer request."""

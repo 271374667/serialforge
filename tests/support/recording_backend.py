@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Mapping, Sequence
+from typing import cast
 
 from serialforge.protocols import TransportProtocol
 from tests.support.fake_backend import FakeBackend
@@ -42,6 +43,9 @@ class RecordingBackend(FakeBackend):
             rate = params["baudrate"]
             assert isinstance(rate, int)
             self.attempts.append((port, rate, threading.get_ident()))
-            transport = super().open(port, params)
+            transport = cast(FakeTransport, super().open(port, params))
             self._latest[port] = self.transports[-1]
+            transport.on_baudrate = lambda new: self.attempts.append(
+                (port, new, threading.get_ident())
+            )
             return transport

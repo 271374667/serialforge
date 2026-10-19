@@ -75,7 +75,6 @@ class DeviceFinder(QObject):
         self._cancel: threading.Event = threading.Event()
         self._lock: threading.RLock = threading.RLock()
         self._active: bool = False
-        self._strict_errors: bool = False
         self._preserve_cancel: bool = False
         self._raw_received: Callable[[bytes], None] | None = None
         self._raw_sent: Callable[[bytes], None] | None = None
@@ -91,6 +90,8 @@ class DeviceFinder(QObject):
 
         Returns:
             Matching devices with successful baudrates and probe responses.
+            Ports and rates that cannot be opened, written or framed are
+            skipped, so no match at all returns an empty list.
 
         Note:
             Different ports are probed concurrently; rates on one port are
@@ -136,9 +137,10 @@ class DeviceFinder(QObject):
             with ThreadPoolExecutor(max_workers=1) as coordinator:
                 result = coordinator.submit(self._scan, mode, port).result()
         except (OSError, RuntimeError) as exc:
+            # Enumeration failures are environment faults: discovery reports
+            # "nothing found" instead of raising through a probe interface.
             if LOG_ENABLED:
                 logger.debug("device scan failed: {}", exc)
-            raise ProbeError(f"device scan failed: {exc}") from exc
         finally:
             with self._lock:
                 self._active = False
@@ -157,7 +159,6 @@ class DeviceFinder(QObject):
             self._cache,
             raw_received=self._raw_received,
             raw_sent=self._raw_sent,
-            strict_errors=self._strict_errors,
         )
         results: list[DeviceInfo] = []
         with ThreadPoolExecutor(max_workers=runtime.probe_pool_size) as pool:
@@ -178,11 +179,10 @@ class DeviceFinder(QObject):
                     try:
                         device = future.result()
                     except (OSError, RuntimeError) as exc:
+                        # Keep probing the remaining ports after one fails.
                         if LOG_ENABLED:
                             logger.debug("device probe worker failed: {}", exc)
-                        raise ProbeError(
-                            f"device probe worker failed: {exc}"
-                        ) from exc
+                        continue
                     if device is not None:
                         results.append(device)
                         if mode is ScanMode.FIRST_MATCH:
