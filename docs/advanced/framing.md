@@ -12,7 +12,7 @@
 
 ## 四种常见的断句策略
 
-serialforge 将断句的规矩统一收在 `FramingConfig` 里：
+SerialForge 将断句的规矩统一收在 `FramingConfig` 里：
 
 | 定界模式 | 它的工作原理 | 形象比喻 | 适用设备类型 |
 | --- | --- | --- | --- |
@@ -81,6 +81,6 @@ forge.configure(
     echo=True,  # 自动吃掉物理回显，只留真正的响应报文
 )
 ```
-serialforge 在匹配命令前会自动帮你筛除物理回音，保护上层逻辑的干净。
+SerialForge 在匹配命令前会自动帮你筛除物理回音，保护上层逻辑的干净。
 
 下一步：[生命周期与重连](lifecycle.md)

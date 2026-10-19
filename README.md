@@ -1,4 +1,4 @@
-# serialforge
+# SerialForge
 
 > 写给那些只想在 Qt 界面上点个按钮读写串口，却被多线程、分包断句、乱码和界面卡死折磨到怀疑人生的开发者。
 
@@ -8,13 +8,16 @@
 
 一旦有人拔掉 USB 线，或者遇上一个打不开的虚拟蓝牙串口，整个程序直接在 `open()` 里面假死，Windows 标题栏挂上灰色的“未响应”。
 
-**serialforge 就是为了消灭这几百行脏代码而生的。**
+**SerialForge 就是为了消灭这几百行脏代码而生的。**
 
 你只管声明业务逻辑：“发什么文本、按什么正则匹配、帮我转成什么类型”。至于底层的后台 I/O 线程、断句切帧、排队限流、超时兜底、断线重连，以及把解析好的数据直接送到 Qt 主线程闭包，全部由库包办。
 
 ```powershell
-uv add "serialforge[pyside6]"  # 或者 serialforge[pyqt6] / serialforge[pyqt5]
+uv add serialforge              # 项目里已经有 Qt（PySide6 / PyQt6 / PyQt5），装本体就够
+uv add "serialforge[pyside6]"   # 环境里一个 Qt 都没有？让它顺手带一份 PySide6 或者 serialforge[pyqt6] / serialforge[pyqt5]
 ```
+
+SerialForge 本体**不带 Qt**，只借用你环境里已有的 `QtCore`。所以你原本用哪套绑定，装完 SerialForge 就继续用哪套，不会被悄悄换掉或升级；只有当你手上连 Qt 都没有时，才需要 extra 代劳。
 
 ---
 
@@ -49,7 +52,7 @@ def read_ping(forge: SerialForge) -> str:
 ### 1. 正则匹配 + 自动转类型，告别手撕字符串
 很多协议长成 `TEMP: 24.8` 这样。以前你得拿正则匹配，取出 group(1)，再用 `float()` 强转，还要套 try-except 防炸。
 
-在 serialforge 里，支持直接绑定数值或 Python `@dataclass`：
+在 SerialForge 里，支持直接绑定数值或 Python `@dataclass`：
 
 ```python
 from dataclasses import dataclass
@@ -125,7 +128,7 @@ def fast_scan(forge: SerialForge, ping_probe: Spec[str]):
 ### 5. 失败不调成功回调
 许多库喜欢不管成功失败都调同一个回调，让用户在回调里写一堆 `if result.is_error(): return`。
 
-serialforge 的策略很干脆：`add_done_callback` 注册的闭包**只在真正成功收到预期回复时触发**。如果超时、设备掉线或者通信出错，成功回调压根不会执行。想看异常细节，去调 `call.result()`，它会把现场原原本本地重抛给你。
+SerialForge 的策略很干脆：`add_done_callback` 注册的闭包**只在真正成功收到预期回复时触发**。如果超时、设备掉线或者通信出错，成功回调压根不会执行。想看异常细节，去调 `call.result()`，它会把现场原原本本地重抛给你。
 
 ---
 

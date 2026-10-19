@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "serialforge"
-version = "0.0.1"
+version = "1.0.0"
 description = "Qt6 Core serial communication toolkit for Windows"
 readme = "README.md"
 license = { text = "MIT" }

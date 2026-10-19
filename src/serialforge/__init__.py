@@ -15,7 +15,7 @@ from importlib.metadata import PackageNotFoundError, version
 try:
     __version__ = version("serialforge")
 except PackageNotFoundError:
-    __version__ = "0.0.1"
+    __version__ = "1.0.0"
 
 from serialforge.connection import SerialHandler
 from serialforge.connection.serial_forge import SerialForge

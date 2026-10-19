@@ -1,4 +1,4 @@
-site_name: serialforge
+site_name: SerialForge
 site_description: 面向 Windows 10/11 x64 的 PySide6 串口通讯库
 site_url: https://271374667.github.io/serialforge/
 repo_url: https://github.com/271374667/serialforge

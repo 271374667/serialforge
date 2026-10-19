@@ -6,7 +6,7 @@
 1. **持续采样（流式，`STREAM`）**：上位机发一句 `START_ADC`，下位机立刻以每秒 50 次的速度源源不断灌波形数据过来。
 2. **紧急通知（主动上报，`EVENT`）**：上位机什么都没问，但下位机检测到电机过载，突然自己往串口塞了一句 `ALARM: OVERHEAT`。
 
-serialforge 为这两种非回合制场景提供了原生的处理模型。
+SerialForge 为这两种非回合制场景提供了原生的处理模型。
 
 ---
 
@@ -53,7 +53,7 @@ stop_call.add_done_callback(lambda _: ticket.cancel())
 
 很多智能设备具备自我保护逻辑，例如高温警报、限位开关触发、低电量提醒。这些通知随时可能从下位机冒出来。
 
-在 serialforge 里，声明一个主动上报只需要**提供 `pattern`，省略 `request`**：
+在 SerialForge 里，声明一个主动上报只需要**提供 `pattern`，省略 `request`**：
 
 ```python
 # 声明一个由设备自发推送的报警事件

@@ -49,7 +49,7 @@ forge.send_async(
 此时你的回调函数触发了，但它怎么知道刚才那个回包对应表格里的哪一行？
 以前大家往往要写各种恶心的全局映射字典、或者拼复杂的闭包包装器，一不小心还容易内存泄漏或行号错乱。
 
-在 serialforge 里，你只需要随手塞一个 `context`：
+在 SerialForge 里，你只需要随手塞一个 `context`：
 
 ```python
 def on_click_row(self, row_idx: int):
@@ -121,7 +121,7 @@ def on_done(msg):
     update_ui(...)       # 真正想干的事情被挤在最底下
 ```
 
-在 serialforge 里，**`add_done_callback` 承诺只为成功的结果上菜**。只要闭包跑起来了，你就可以确定数据是新鲜有效的，直接写业务逻辑。
+在 SerialForge 里，**`add_done_callback` 承诺只为成功的结果上菜**。只要闭包跑起来了，你就可以确定数据是新鲜有效的，直接写业务逻辑。
 
 ### 那么失败去哪里看？
 如果你需要感知失败，有两种常见模式：

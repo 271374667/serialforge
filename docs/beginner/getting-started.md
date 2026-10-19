@@ -14,22 +14,27 @@
 - **[波特率](../appendix/glossary.md#baudrate)**：双方讲话的语速，常见的是 `115200` 或 `9600`。两边语速没对上，听到的一定是乱码。
 - **[帧](../appendix/glossary.md#frame)**：协议里的“完整一句话”。串口线本身只管吐字节，没有标点符号；哪几个字节凑成一句话，全靠换行符或者停顿来切分。
 
-你可以把串口想象成一条传送带，波特率是传送带的速度，一帧数据就是上面的一个快递盒。serialforge 负责在传送带末端帮你拆开盒子、核对条码，再把里面的物件递到你手上。
+你可以把串口想象成一条传送带，波特率是传送带的速度，一帧数据就是上面的一个快递盒。SerialForge 负责在传送带末端帮你拆开盒子、核对条码，再把里面的物件递到你手上。
 
 ---
 
 ## 1. 安装与环境准备
 
-准备好 64 位的 Windows 10/11，以及 Python 3.11–3.14 环境，通过 `uv` 安装你偏好的 Qt 绑定：
+准备好 64 位的 Windows 10/11，以及 Python 3.11–3.14 环境。SerialForge 本体不捆绑 Qt，怎么装取决于你手头的环境：
 
-```powershell
-uv add "serialforge[pyside6]"   # 推荐 PySide6；也可以选 serialforge[pyqt6] 或 serialforge[pyqt5]
-```
+- **项目里已经有 Qt**（PySide6 / PyQt6 / PyQt5 任意一套）：直接装本体，复用它就行，版本不会被库悄悄改动。
+  ```powershell
+  uv add serialforge
+  ```
+- **干净的新环境，连 Qt 都没有**：带上 extra，让 SerialForge 顺手把绑定装上。推荐 PySide6（LGPL 授权，商用最省心）。
+  ```powershell
+  uv add "serialforge[pyside6]"   # 也可以选 serialforge[pyqt6] 或 serialforge[pyqt5]
+  ```
 
-serialforge 本身只依赖轻巧的 `QtCore`，绝不会偷偷弹窗或引入笨重的界面库。
+拿不准自己装的是哪套？`uv pip list` 里扫一眼 `PySide6` / `PyQt6` / `PyQt5` 就有了。库只借用轻巧的 `QtCore`，绝不会偷偷弹窗或拖进笨重的界面库。
 
 ### 关于 Qt 应用程序实例
-因为 serialforge 依赖 Qt 的事件循环把消息送回主线程，在创建 `SerialForge()` 前，请确保你的进程里已经有了 Qt 应用程序实例：
+因为 SerialForge 依赖 Qt 的事件循环把消息送回主线程，在创建 `SerialForge()` 前，请确保你的进程里已经有了 Qt 应用程序实例：
 
 - **桌面 GUI 程序**：你在界面入口处早就有 `app = QApplication(sys.argv)` 了，直接在主线程创建 `SerialForge()` 即可。
 - **命令行脚本或测试**：如果只想写个无界面的轻量脚本，可以用最省事的一行写法：
@@ -42,7 +47,7 @@ serialforge 本身只依赖轻巧的 `QtCore`，绝不会偷偷弹窗或引入�
 
 ## 2. 声明一条命令
 
-在 serialforge 里，你不需要在每个地方拼字符串，而是像做菜单一样，集中声明每条命令长什么样：
+在 SerialForge 里，你不需要在每个地方拼字符串，而是像做菜单一样，集中声明每条命令长什么样：
 
 ```python
 # 声明一条发 PING、期待回 PONG 的简单命令
@@ -53,7 +58,7 @@ PING = forge.add(
 ```
 
 ### 想要直接拿数值或对象？
-这是 serialforge 最讨喜的地方之一。通过 `result_type` 参数，你可以让它自动完成类型提取：
+这是 SerialForge 最讨喜的地方之一。通过 `result_type` 参数，你可以让它自动完成类型提取：
 
 ```python
 # 想要浮点数：正则捕获到的第一组数字会自动 float()

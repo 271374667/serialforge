@@ -38,7 +38,7 @@ UART 是芯片之间常见的串行通信硬件；USB-CDC 是让 USB 设备“�
 一致，收到的就是一堆乱码或干脆没有回应。串口调试里最常见的翻车现场，就是设备在
 `115200`，上位机却在 `9600` 深情呼唤。
 
-serialforge 扫描时会逐个尝试候选波特率，省得你手动一个个试。
+SerialForge 扫描时会逐个尝试候选波特率，省得你手动一个个试。
 
 ### VID / PID {: #vid-pid }
 
@@ -49,14 +49,14 @@ USB 设备的“厂牌”和“型号”编号。VID 是厂商编号，PID 是�
 ### 8N1 {: #8n1 }
 
 串口最常见的帧格式：8 个数据位、无校验（None）、1 个停止位。绝大多数设备默认就是
-8N1，serialforge 的 `SerialConfig` 默认也是 8N1、无流控。
+8N1，SerialForge 的 `SerialConfig` 默认也是 8N1、无流控。
 
 ### 流控 / DTR / RTS {: #flow-control }
 
 流控是“你先别发，我这边缓冲要满了”的握手机制，常见有 RTS/CTS 和 XON/XOFF。
 DTR、RTS 是串口上的两根控制线，有些设备靠它们复位或进入下载模式。
 
-serialforge 默认不碰这些线；需要时用 `SerialConfig` 显式设置，避免“打开串口顺便把
+SerialForge 默认不碰这些线；需要时用 `SerialConfig` 显式设置，避免“打开串口顺便把
 设备复位了”的惊喜。
 
 ## 数据与协议 {: #protocol-basics }
@@ -79,12 +79,12 @@ serialforge 默认不碰这些线；需要时用 `SerialConfig` 显式设置，�
 - 用特殊分隔符（`DELIMITED`）；
 - 开头先报长度（`LENGTH_PREFIX`）。
 
-serialforge 把这些策略收在 `FramingConfig` 里。
+SerialForge 把这些策略收在 `FramingConfig` 里。
 
 ### 结束符 / CRLF {: #terminator }
 
 `\r\n` 就是 CRLF（回车 + 换行）。很多设备只认带结束符的请求，就像寄信要贴邮票。
-serialforge 默认发送时补 `\r\n`，你声明请求文本时不用自己写。
+SerialForge 默认发送时补 `\r\n`，你声明请求文本时不用自己写。
 
 ### 回显 {: #echo }
 
@@ -104,14 +104,14 @@ serialforge 默认发送时补 `\r\n`，你声明请求文本时不用自己写�
 
 ### 校验和 {: #checksum }
 
-有些协议会在帧尾带一个校验值，用来发现传输过程中的位翻转。serialforge 不替你实现
+有些协议会在帧尾带一个校验值，用来发现传输过程中的位翻转。SerialForge 不替你实现
 业务校验；需要时在 `parser` 里自己算，或者在声明里用 `error_pattern` 识别设备回的错误帧。
 
 ### 正则表达式 / 命名组 {: #regex }
 
 正则就是“用一张模式纸条去比对文本”。`\d+` 表示一串数字，`.*` 表示任意内容，
 `(?P<value>\d+)` 是命名组：匹配到的数字会以 `value` 为名交给你，省得再按下标猜。
-serialforge 用正则匹配整帧响应，命名组可以直接变成 `dict` 或 dataclass。
+SerialForge 用正则匹配整帧响应，命名组可以直接变成 `dict` 或 dataclass。
 
 ### RX / TX {: #rx-tx }
 
@@ -143,13 +143,13 @@ Qt 的“前台接待”：不断从队列里取事件（点击、定时器、�
 
 ### 主线程 / 工作线程 {: #threads }
 
-主线程通常就是 GUI 线程，负责画界面；工作线程负责耗时或会阻塞的 I/O。serialforge
+主线程通常就是 GUI 线程，负责画界面；工作线程负责耗时或会阻塞的 I/O。SerialForge
 把串口读写放在自己的工作线程里，再把结果排队回主线程，所以你可以在回调里直接改控件。
 
 ### I/O 线程 {: #io-thread }
 
 专门负责读写串口的后台线程。它不怕等，怕的是主线程陪它一起等——主线程一卡，界面就
-变灰，用户就开始点“关闭程序”。serialforge 的 I/O 线程由库管理，退出时用
+变灰，用户就开始点“关闭程序”。SerialForge 的 I/O 线程由库管理，退出时用
 `disconnect()` 把它好好送走。
 
 ### aboutToQuit {: #about-to-quit }
@@ -159,12 +159,12 @@ Qt 应用退出前发出的信号。把 `forge.disconnect()` 接上去，相当�
 
 ### loguru {: #loguru }
 
-一个 Python 日志库，serialforge 内部用它写 DEBUG 日志。默认是静默的，不会突然在你
+一个 Python 日志库，SerialForge 内部用它写 DEBUG 日志。默认是静默的，不会突然在你
 控制台刷屏；要排查问题时再通过 `LogConfig` 打开文件日志。
 
 ### pyserial {: #pyserial }
 
-Python 里操作串口的底层库，serialforge 用它打开 `COMx`、读写字节。你通常不需要直接
+Python 里操作串口的底层库，SerialForge 用它打开 `COMx`、读写字节。你通常不需要直接
 调用它；把它想成“库的库”就行。
 
 ### 编码 / UTF-8 / GBK {: #encoding }
@@ -174,7 +174,7 @@ Python 里操作串口的底层库，serialforge 用它打开 `COMx`、读写字
 
 ### dataclass {: #dataclass }
 
-Python 自带的数据类写法，用字段名描述一个对象。serialforge 支持把命名组直接构造成
+Python 自带的数据类写法，用字段名描述一个对象。SerialForge 支持把命名组直接构造成
 dataclass，这样 `message.data[0].version` 比 `message.data[0]["version"]` 更适合
 让 IDE 补全，也更不容易拼错字段。
 
@@ -193,23 +193,23 @@ def on_done(message):
     self.label.setText(str(message.data[0]))
 ```
 
-这个 `on_done` 捕获了 `self`，所以它知道该更新哪个控件。serialforge 会把这个闭包排队
+这个 `on_done` 捕获了 `self`，所以它知道该更新哪个控件。SerialForge 会把这个闭包排队
 到主线程再执行，不需要你手动 `QMetaObject.invokeMethod`。
 
 ### 信号槽 {: #signal-slot }
 
-Qt 的发布订阅机制：信号发出，槽函数被调用。serialforge 的 `connection_state_changed`、
+Qt 的发布订阅机制：信号发出，槽函数被调用。SerialForge 的 `connection_state_changed`、
 `received`、`raw_sent` 都是信号；连接它们就是“订阅这些事件”。
 
 ### 队列与优先级 {: #queue }
 
-命令得排队，不能想插队就插队。serialforge 内部有一个队列，默认先来先发；`URGENT`
+命令得排队，不能想插队就插队。SerialForge 内部有一个队列，默认先来先发；`URGENT`
 优先级可以理解为“这张单子先处理”。流式采集期间，普通独占命令会被判 `BUSY`，因为
 设备只有一张嘴。
 
 ### 超时与期限 {: #timeout }
 
-超时是“最多等多久”。serialforge 有两层：声明里的协议预算（等设备回一帧）和调用期限
+超时是“最多等多久”。SerialForge 有两层：声明里的协议预算（等设备回一帧）和调用期限
 （从提交到结果送达主线程）。默认 3 秒量的是调用期限，设备响应只是其中一段，别把两者
 混为一谈。
 
@@ -223,7 +223,7 @@ Qt 的发布订阅机制：信号发出，槽函数被调用。serialforge 的 `
 对象创建后字段不能改。`Spec` 和 `Message` 都是冻结对象，好处是你不用担心中间被谁
 偷偷改了字段；声明对象也因此可以安全地跨线程、跨回调复用。
 
-## serialforge 词表 {: #serialforge-terms }
+## SerialForge 词表 {: #serialforge-terms }
 
 ### 门面 {: #facade }
 

@@ -4,7 +4,7 @@
 
 在传统的串口代码里，我们经常看到这样的场景：几十个不同功能的地方散落着类似 `ser.write(b"READ\r\n")`，紧接着后面跟着几行 `ser.readline().decode().strip().split(",")`。一旦下位机固件改了一个字母，满屏的字符串切片瞬间翻车。
 
-serialforge 提倡**集中声明**：把所有和协议相关的细节写在一处。每一个声明对象都是冻结且不可变的，库在全链路内部严格保持对象的身份同一性。这意味着在回调函数里，你可以底气十足地使用 `message.spec is READ_VOLTAGE` 来分流处理，不需要猜字符串。
+SerialForge 提倡**集中声明**：把所有和协议相关的细节写在一处。每一个声明对象都是冻结且不可变的，库在全链路内部严格保持对象的身份同一性。这意味着在回调函数里，你可以底气十足地使用 `message.spec is READ_VOLTAGE` 来分流处理，不需要猜字符串。
 
 ---
 
@@ -39,7 +39,7 @@ ALARM = forge.add(pattern=r"ALARM:\s*(?P<code>\d+)", result_type=int)
 
 ## 五种对话姿势（ResponseMode）
 
-工业场景下的通信千奇百怪，serialforge 将其归纳为五种清晰的模式：
+工业场景下的通信千奇百怪，SerialForge 将其归纳为五种清晰的模式：
 
 | 模式 | 声明方式 | 形象比喻 | 典型应用场景 |
 | --- | --- | --- | --- |
@@ -81,7 +81,7 @@ ALARM = forge.add(pattern=r"ALARM:\s*(?P<code>\d+)", result_type=int)
 
 ## 杀手级特性：自动数据解析（result_type）
 
-还在手写字符串切分？来看看 serialforge 的类型自动映射：
+还在手写字符串切分？来看看 SerialForge 的类型自动映射：
 
 ### 1. 标量自动转换：`int` 与 `float`
 如果你的正则捕获组提取的是数值，只要写 `result_type=int` 或 `result_type=float`，库会自动找到第一个捕获组并调用类型转换：
@@ -155,7 +155,7 @@ CUSTOM_CMD = forge.add("GET_RAW", r"[0-9A-F]+", parser=parse_hex_crc)
 
 ## 统一的数据形态：`Message.data` 永远是列表
 
-无论底层收到了什么，serialforge 交付给你的 `Message.data` **永远是一个 `list`**：
+无论底层收到了什么，SerialForge 交付给你的 `Message.data` **永远是一个 `list`**：
 - 单条回复（`SINGLE`）：单元素列表 `[result]`
 - 多条回复（`MULTI`）：多元素列表 `[result1, result2, ...]`
 - 无回复（`NO_REPLY`）：空列表 `[]`
