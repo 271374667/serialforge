@@ -2,23 +2,28 @@
 
 > 适用版本: 0.0.1 | SerialForge 公共 API 改造
 
-本页是签名与语义参考。想先看怎么写，请读[快速开始](getting-started.md)里的推荐用法
-（命令集中声明、`send_async` + 主线程闭包、`scan_sync` 返回值连接）与[使用指南](usage.md)。
+> 这页像字典：查签名和默认值用的，不建议从头读到尾。
+
+想先看怎么写，请读[快速开始](beginner/getting-started.md)与
+[进阶指南](advanced/index.md)。术语卡住了看[术语表](appendix/glossary.md)，
+那里用一句人话解释“门面”“声明”“调用句柄”这些词。
 
 ## 日常顶层接口
 
-SerialForge、Spec、Message、MessageCategory、DeviceInfo、CommandStatus、ConnectionState、
-ResponseMode、Correlation、ScanMode、SerialForgeError。进阶配置及 CommandCall/SpecRole
-在 serialforge.advanced，执行异常在 serialforge.errors。
+常用的就这几个：`SerialForge`、`Spec`、`Message`、`MessageCategory`、`DeviceInfo`、
+`CommandStatus`、`ConnectionState`、`ResponseMode`、`Correlation`、`ScanMode`、
+`SerialForgeError`。进阶配置和 `CommandCall` / `SpecRole` 在 `serialforge.advanced`，
+执行异常在 `serialforge.errors`。
 
-过渡期另保留 SerialHandler、DeviceFinder、DeviceProfile、CommandSpec、EventSpec、LogConfig、
-CommandResult、DeviceEvent，共 19 个名字；兼容构造/方法不代表保留旧信号或返回值类型。
-最终收敛 11 个名字的移除版本另定，本轮不发布。
+你可能会在补全里看到 19 个名字，这是过渡期的兼容层：其中一部分是未来保留的日常接口，
+其余是旧入口的桥接。新代码只用 `SerialForge` / `Spec` / `Message` 这一套；兼容构造和
+方法存在，不代表旧信号或旧返回类型也一起保留。最终收敛到 11 个名字的版本另定，
+本轮不发布。
 
 ## SerialForge
 
 QObject 门面，组合串口生命周期、发现和调度组件，不要求手工构建配置/声明对象。
-以下签名列出所有重载，字段形式的必填项没有默认值。参数、字典和期限语义见[使用指南](usage.md)。
+以下签名列出所有重载，字段形式的必填项没有默认值。参数、字典和期限语义见[进阶指南](advanced/index.md)。
 
 ### 门面方法签名
 
@@ -136,13 +141,15 @@ def callback_exception(self) -> Exception | None: ...
 | 信号 | 参数 | 语义 |
 | --- | --- | --- |
 | connection_state_changed | ConnectionState | 新连接状态 |
-| received | Message[Any] | 所有原始接收、解析帧、事件和终态 |
+| received | Message[Any] | 只发 raw_data 非空的原始接收行/读块 |
 | raw_sent | bytes | 底层确认实际写入的字节 |
 
-三个信号在 Qt 应用主线程投递。门面和兼容 SerialHandler 都不暴露 traffic_logged/
+三个信号在 Qt 应用主线程投递。`received` 不含解析帧、命令终态、事件或流式帧（这些消息的
+`raw_data` 为空）；命令结果从同步返回值、`call.result()` 或成功回调获取。
+门面和兼容 SerialHandler 都不暴露 traffic_logged/
 error_occurred/command_finished/event_received/scan_finished/scan_progress。
-扫描结果只由返回值交付：同步用 `scan_sync()`，异步用 `scan_async()` 的
-`add_done_callback()`。
+扫描结果只由调用句柄交付：异步用 `scan_async()` 的 `add_done_callback()` / `result()`，
+阻塞场景用 `scan_sync()`。
 
 ## Message
 
@@ -156,7 +163,7 @@ error_occurred/command_finished/event_received/scan_finished/scan_progress。
 | spec | 原始 Spec/兼容声明或 None | 原对象身份 |
 | request_id | str="" | 每次调用唯一 ID；无所属调用为空 |
 | raw_frames | tuple[bytes, ...]=() | 不含定界字节的帧 |
-| raw_data | bytes=b"" | RAW_RECEIVE 的真实读块 |
+| raw_data | bytes=b"" | 非空时才经 received 发布；LINE 为完整行，其他模式为读块 |
 | context / params | Mapping[str, object]，只读空快照 | 应用元数据 / 协议占位符 |
 | status | CommandStatus.NONE | 无命令终态时 NONE |
 | route | SendRoute.NONE | 无发送路径时 NONE |
@@ -165,13 +172,13 @@ error_occurred/command_finished/event_received/scan_finished/scan_progress。
 | error_message | str="" | 失败说明 |
 
 ok 仅 COMMAND_RESULT 且 OK 为真；raw_frame 仅恰好一帧时返回它，否则 b""。
-同一终态的信号、同步返回、调用 result 和成功回调共享同一个 Message。
+同一终态的同步返回、调用 result 和成功回调共享同一个 Message；它不进入 `received`。
 
 ## 进阶配置
 
 DeviceProfile、DeviceFinder、LogConfig、SerialConfig、FramingConfig、ReadLoopConfig、
 RuntimeConfig、ProbeSpec、HandlerStats、ScanCall、ConnectCall 以及串口/定界/优先级/路由/超时枚举在 advanced。
-底层 TrafficRecord/CommandTicket 仅保留兼容导入，不是推荐的日常结果与日志入口。
+底层 TrafficRecord/CommandTicket 只是兼容导入，日常结果与日志入口不在这里。
 
 ## 执行异常
 

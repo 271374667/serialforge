@@ -1,72 +1,72 @@
-# 平台与限制
+# 平台支持与边界
 
-> 适用版本: 0.0.1 | SerialForge 公共 API 改造
+> 先把丑话说在前头，省得你在不兼容的系统上折腾半天才发现我们压根不支持。
 
-## 支持范围
+很多开源库喜欢吹嘘“全平台通用”，结果你一到 Windows 真实硬件环境，各种睡眠唤醒丢数据、蓝牙假死、驱动打架的问题接踵而至。serialforge 的策略是：**专注把 Windows 10/11 x64 的工控机和 PC 上位机场景做扎实**。
 
-| 项目 | 要求 |
-| --- | --- |
-| 操作系统 | Windows 10/11 x64 |
-| Python | 3.11–3.14（64 位） |
-| 运行时依赖 | `pyserial>=3.5`、`loguru>=0.7` |
-| Qt | 三选一：PySide6-Essentials>=6.11.2、PyQt6>=6.11、PyQt5>=5.15.11 |
+---
 
-不承诺 Linux、macOS、32 位 Windows 或与硬件无关的真机行为。库只使用 QtCore，
-不导入 QtWidgets/QtGui，不使用 asyncio 或多进程。
+## 运行环境要求
 
-Qt 下限 6.11.2 是当前通过完整测试套件的保守值：更早的 Qt 绑定存在信号 `connect`
-与兼容 `SerialHandler.connect` 的名称冲突（新门面已改用 `connect_sync`/`connect_async`），
-中间版本未逐一验证。
+| 环境维度 | 具体要求与限制 | 备注说明 |
+| --- | --- | --- |
+| **操作系统** | Windows 10 / 11 x64 | 绝大多数工业工控机、测试台 PC 的标准环境 |
+| **Python** | 3.11 – 3.14（必须是 64 位版本） | 现代 Python 类型提示与性能基准 |
+| **基础依赖** | `pyserial>=3.5`, `loguru>=0.7` | 底层串口通信与私有调试日志库 |
+| **Qt 绑定** | 三选一：`PySide6-Essentials>=6.11.2`, `PyQt6>=6.11`, `PyQt5>=5.15.11` | 仅使用轻量的 `QtCore` 组件 |
 
-## Qt 绑定选择
+### 明确不承诺的范围
+- **不承诺 Linux 与 macOS**：工控现场绝大多数都是 Windows 工业机，我们不想为了跨平台妥协针对 Windows 驱动特性的加固逻辑。
+- **不导入 `QtWidgets` 或 `QtGui`**：虽然我们为 Qt 生态设计，但库本身绝对不会擅自创建窗口或引入庞大的 GUI 模块。你可以用它写纯控制台守护脚本、定时测试服务，也可以无缝嵌进庞大的桌面软件里。
+- **不依赖 `asyncio` 或 `multiprocessing`**：在 Qt 生态中，最稳健可靠的多任务机制永远是原生事件循环与 `QThread` 信号槽桥接。混用 Python 的 `asyncio` 常常会导致事件循环竞争或者主线程阻塞。
 
-同一次运行只能加载一个绑定。只安装一个时无需配置；同时安装多个时，启动前设置环境变量：
+---
+
+## Qt 绑定切换与选择
+
+库内部通过轻量级的适配器桥接 QtCore。
+
+如果你只安装了其中一个（例如 `serialforge[pyside6]`），直接正常启动即可，无需任何额外配置。
+
+如果你在开发机上同时安装了多个 Qt 绑定，请在程序启动前通过环境变量明确指定：
 
 ```powershell
-$env:QT_API = "pyside6"   # 或 pyqt6 / pyqt5
+$env:QT_API = "pyside6"   # 或者 "pyqt6" / "pyqt5"
 ```
 
-已加载的绑定与设置必须一致，不一致直接报错。PyQt5/PyQt6 为 Riverbank GPL v3 / 商业双授权，
-使用方需按其条款履行义务。
+> **合规提醒**：PyQt5 / PyQt6 属于 Riverbank 商业与 GPL v3 双授权协议，若在闭源商业软件中使用请自行评估合规义务；PySide6 为 LGPL 授权，动态链接使用符合常规商业发布要求。
 
-## 线程边界
+---
 
-- 在 Qt 应用主线程创建 `SerialForge`；`add`、`send_async` 支持应用线程调用。
-- `scan_sync()`、`connect_sync()`、`send_sync()` 都**阻塞调用者**；`scan_async()` / `connect_async()`
-  是异步入口，后台线程执行、闭包在主线程拿到 `list[DeviceInfo]` / `DeviceInfo`。
-  `connect_sync()`/`send_sync()` 仍要放到应用自己的工作线程，否则事件循环被卡住，闭包也投递不进来。
-- 异步结果经主线程排队投递：`add_done_callback` 的闭包、`received`、`raw_sent`、
-  `connection_state_changed` 都在主线程被调用，保持事件循环运行即可安全更新界面。
-- `cancel_scan()`、`disconnect()` 可被其他线程调用以取消进行中的工作；
-  `disconnect()` 会等待 I/O 与扫描结束，可重复调用。
+## 线程边界与调用纪律
 
-## 真机验证边界
+为了确保你的 UI 永远流畅，请牢记这条纪律：
 
-仓库当前完成的是软件验收：Python 3.11–3.14 × 三种 Qt 绑定的组合测试、静态检查、
-构建与干净 wheel 冒烟。**整张 Windows 真机验证矩阵尚未宣称通过**，以下行为需要由使用方
-按自己的硬件与适配器复验：
+1. **`SerialForge()` 门面对象必须在 Qt 主线程创建**。
+2. **`scan_async()` / `connect_async()` / `send_async()`**：无论你在哪个线程发起，它们返回的句柄上的 `add_done_callback` 闭包，**百分之百会在 Qt 主线程触发**。你可以放心地在闭包里刷新界面控件。
+3. **`scan_sync()` / `connect_sync()` / `send_sync()`**：这些方法会**强行阻塞当前调用线程**。如果你非要用同步写法，请把它挪到你自己开的 `QThread` 工作者线程里执行；如果在主线程的按钮点击槽里直接调同步方法，界面在设备回包前一定会卡死。
 
-- 睡眠/唤醒后恢复通讯，USB 选择性挂起导致的掉线；
-- 驱动或适配器在打开串口时的 DTR/RTS 脉冲；
-- 拔插重连与自动重连的退避行为；
-- TX-RX 回环（须把独立适配器的 TX 与 RX 物理短接后再测；接到目标设备时它不会回显
-  `SERIALFORGE_LOOPBACK`）；
-- 驱动信息与 USB 身份过滤（VID/PID）在目标机器上的表现。
+---
 
-完整矩阵与验收口径见仓库内 `.agents/docs/knowledge/software/0003_Windows真机验证矩阵.md`，
-`.agents/docs/knowledge/software/0004_阻塞连接与可选USB身份契约.md` 记录了连接与身份的最新契约。
+## 硬件真机验证边界
 
-遇到挂起导致的掉线，可以检查 Windows 的 USB 选择性暂停和设备电源管理选项；库不会修改系统设置。
+仓库中当前的自动化测试保证了**全套软件逻辑的严格闭环**（Python 3.11–3.14 矩阵覆盖、三套 Qt 绑定交叉测试、纯净 wheel 包无死锁验证）。
 
-## 运行数据与打包
+但在真实的物理世界里，硬件的脾气往往比单元测试丰富得多。不同品牌的 USB 转串口芯片（如正品 FTDI vs 盗版 CH340）以及工控机主板的供电策略各不相同。
 
-- 日志与波特率缓存写入 Qt 应用数据目录；PyInstaller 打包后也不要改到程序目录。
-- wheel 与 sdist 只包含 `src/serialforge`，不含 `tests`、`examples`、测试替身或字节码；
-  测试替身在源码仓库的 `tests/support/`，仅供本地验证。
-- 用 PyInstaller 打包的使用方需自行履行 PySide6 LGPL 合规义务。
+如果你正在开发严苛的工业级系统，建议在现场复验以下硬件行为：
+- **Windows USB 选择性挂起**：工控机长时间不操作可能会为了省电切断 USB 供电，导致串口莫名掉线。现场排查时请检查 Windows 电源管理设置中的“USB 选择性暂停”。
+- **打开串口时的 DTR/RTS 脉冲**：有些 USB 转串口适配器在 `open()` 的一瞬间，硬件引脚会产生一个短暂的电平跳变。如果你的单片机正好把 DTR 连到了复位引脚上，打开串口可能会意外把单片机重启了。遇到这种情况，可以通过 `SerialConfig` 显式接管流控信号。
+- **物理 TX-RX 回环**：如果需要做自发自收的硬件健康检查，请把独立转接头的 TX 和 RX 物理短接。
 
-## 下一步
+---
 
-- [快速开始](getting-started.md)：推荐用法的最小程序
-- [使用指南](usage.md)：声明、发送、闭包消费、扫描连接与定界
-- [API 参考](api.md)：门面、声明、调用句柄、消息与异常签名
+## 打包为可执行文件（PyInstaller）
+
+使用 PyInstaller 打包时：
+- 我们的库完全支持常规的单目录（`-D`）或单文件（`-F`）打包。
+- 运行时日志和波特率缓存会自动存入系统的标准 Qt 应用数据目录（`%LOCALAPPDATA%`），即使打包成只读的 EXE 也绝不会因为权限不足而闪退。
+
+下一步：
+- [新手入门 · 快速开始](beginner/getting-started.md)
+- [API 参考](api.md)

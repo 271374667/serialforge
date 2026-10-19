@@ -149,12 +149,12 @@ def smoke(wheel: Path, version: str, binding: str = "pyside6") -> None:
         ]
         run([*prefix, "python", "-c", IDENTITY_CHECK], cwd=directory, env=env)
         run(
-            [*prefix, "python", "examples/quick_start.py"],
+            [*prefix, "python", "examples/advanced/quick_start.py"],
             cwd=directory,
             env=env,
         )
         run(
-            [*prefix, "python", "examples/auto_connect.py"],
+            [*prefix, "python", "examples/advanced/auto_connect.py"],
             cwd=directory,
             env=env,
         )

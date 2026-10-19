@@ -72,7 +72,7 @@ def test_real_port_tx_rx_loopback() -> None:
     received: list[Message[Any]] = []
     handler.connection_state_changed.connect(states.append)
     handler.received.connect(received.append)
-    handler.connect(DeviceInfo(port=port, baudrate=baudrate))
+    handler.connect_async(DeviceInfo(port=port, baudrate=baudrate))
     try:
         _wait_for(
             application,

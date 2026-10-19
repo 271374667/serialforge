@@ -78,7 +78,7 @@
 | 想深入 | 读什么 |
 | --- | --- |
 | 设计契约 | 已落地契约见下方知识索引 0005；v10 方案原件不在本仓库内 |
-| 使用方推荐用法（声明集中、异步闭包、scan_sync/scan_async + connect） | `.agents/docs/knowledge/software/0011_推荐用法_集中声明与异步闭包.md` |
+| 使用方推荐用法（声明集中、异步闭包、scan_async/connect_async + VID/PID 加速） | `.agents/docs/knowledge/software/0011_推荐用法_集中声明与异步闭包.md` |
 | 用户批准的公共 API 改造覆盖契约 | `.agents/docs/knowledge/software/0005_公共API改造_契约索引与迁移.md` |
 | Spec 声明与 add 重载 | `.agents/docs/knowledge/software/0006_Spec声明与add重载契约.md` |
 | Message 与收发观察 | `.agents/docs/knowledge/software/0007_Message与收发观察契约.md` |
@@ -95,6 +95,10 @@
 
 | 日期 | commit | 改了什么 |
 | --- | --- | --- |
+| 2026-10-19 | 本次提交 | 公开文档去模板化：删除“只做一件事/不是 A 而是 B/先放一边”等句式，改为口语化连接；快速开始不再从 `serialforge.qt_core` 导入 Qt 类，改为使用方自己的 PySide6/PyQt 绑定创建应用；`SerialForge` 在无应用实例时抛出明确 `ConfigError`，示例用 `examples/qt_app.py` 垫片兼容三套绑定，新增宿主应用与缺失应用测试 |
+| 2026-10-19 | 本次提交 | 文档语言改为面向“只懂 Qt、第一次接触串口”的口语化写法：进阶页用比喻展开概念，新增 `docs/appendix/glossary.md` 术语表（顶部“附录”Tab），正文首次出现的串口/线程/协议术语链到对应锚点；README 与入门页同步 |
+| 2026-10-19 | 本次提交 | 文档按难度分层并启用顶部 Tab：`新手入门`（`docs/index.md` + `docs/beginner/`）只保留最小可用路径，`进阶指南`（`docs/advanced/`）按功能拆页，示例页拆成简单/完整两页；示例目录拆为 `examples/simple/`（同步、异步各一个短脚本）与 `examples/advanced/`（原有四个完整示例），测试、CI、源码 docstring 与文档引用同步 |
+| 2026-10-19 | 本次提交 | 使用方推荐口径改为 `scan_async()` + `connect_async()`（可给 `vid_pid` 在打开前过滤端口加速），并用 `send_async` 主线程闭包消费；README、`docs/` 五页、知识 0011 与示例同步。随库示例迁到 `received` 非空原始字节契约：命令结果从调用句柄/回调/同步接口取，流式与主动上报按原始行观察，`tests/test_examples.py` 断言同步 |
 | 2026-10-19 | 本次提交 | 连接拆分 `connect_sync()` / `connect_async()`：后台线程走同一连接路径，`ConnectCall.add_done_callback` 在主线程交付 `DeviceInfo`，失败不回调、`result()` 重抛、`cancel()`/`disconnect()` 中止并抑制回调；异步期间拒绝并发 scan/connect/configure，示例/文档/API 快照同步 |
 | 2026-10-19 | 本次提交 | 同步扫描改名 `scan()` → `scan_sync()`，与 `send_sync()` 命名一致；示例、测试、文档与 API 快照同步 |
 | 2026-10-19 | 本次提交 | 新增 `scan_async()` + `advanced.ScanCall`：后台线程执行同一扫描路径，`add_done_callback` 在主线程交付 `list[DeviceInfo]`，失败不回调、`result()` 重抛，`cancel()`/`disconnect()` 抑制回调；异步期间拒绝并发 scan/connect/configure，API 快照与文档同步 |

@@ -56,8 +56,8 @@ class HandlerCore(QObject):
         created, register before sending: ``handler.register(spec)``;
         ``handler.connect()``; then ``handler.send(spec)``.
         In the completion slot, check ``result.spec is spec`` and ``result.ok``.
-        See ``examples/quick_start.py`` for an executable no-hardware
-        application.
+        See ``examples/advanced/quick_start.py`` for an executable
+        no-hardware application.
     """
 
     connection_state_changed = Signal(ConnectionState)
@@ -340,7 +340,11 @@ class HandlerCore(QObject):
         Raises:
             CommandError: Called in a running Qt event loop or send is invalid.
         """
-        if QThread.currentThread().loopLevel() > 0:
+        try:
+            in_loop = QThread.currentThread().loopLevel() > 0
+        except AttributeError:
+            in_loop = False
+        if in_loop:
             raise CommandError("send_and_wait cannot run in a Qt event loop")
         if timeout <= 0:
             raise CommandError("timeout must be positive")

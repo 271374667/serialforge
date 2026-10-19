@@ -1,6 +1,8 @@
+> 归档时间: 2026-10-19  |  归档原因: 示例迁移到 received 非空原始字节契约，并同步推荐 scan_async/connect_async 口径；tests/test_examples.py 全部通过  |  原路径: .agents/docs/todo/0011_迁移随库示例到received非空原始数据契约.md
+
 # 0011_迁移随库示例到received非空原始数据契约
 
-> 状态: 排队  |  创建: 2026-10-10  |  完成: -
+> 状态: 已完成  |  创建: 2026-10-10  |  完成: 2026-10-19
 > 优先级: 中  |  关联 checkpoint: -
 
 ## 背景

@@ -260,9 +260,9 @@ def test_connect_replaces_session_before_opening_target(
             if expected_port != "FIRST":
                 assert not PortRegistry.is_owned("FIRST")
             result = facade.send_sync(read)
-            assert (
-                result.spec is read and result.data == [f"VALUE:{expected_port}"]
-            )
+            assert result.spec is read and result.data == [
+                f"VALUE:{expected_port}"
+            ]
             app().processEvents()
             expected_states = [ConnectionState.DISCONNECTED]
             if not isinstance(target, DeviceInfo):
@@ -1226,9 +1226,7 @@ def test_connect_async_cancel_suppresses_callback(
     )
     open_port = backend.open
 
-    def slow_open(
-        port: str, params: Mapping[str, object]
-    ) -> TransportProtocol:
+    def slow_open(port: str, params: Mapping[str, object]) -> TransportProtocol:
         time.sleep(0.3)
         return open_port(port, params)
 
@@ -1259,14 +1257,10 @@ def test_connect_async_rejects_concurrent_lifecycle_operations(
 ) -> None:
     """Reserve the facade while the asynchronous connection is pending."""
     app()
-    backend = FakeBackend(
-        [SimulatedDevice(None, None, port="ASYNC-CONN-BUSY")]
-    )
+    backend = FakeBackend([SimulatedDevice(None, None, port="ASYNC-CONN-BUSY")])
     open_port = backend.open
 
-    def slow_open(
-        port: str, params: Mapping[str, object]
-    ) -> TransportProtocol:
+    def slow_open(port: str, params: Mapping[str, object]) -> TransportProtocol:
         time.sleep(0.3)
         return open_port(port, params)
 
@@ -1300,9 +1294,7 @@ def test_connect_async_rejects_concurrent_lifecycle_operations(
 def test_disconnect_during_connect_async_returns_without_deadlock() -> None:
     """Join a pending asynchronous connection from another thread."""
     app()
-    backend = FakeBackend(
-        [SimulatedDevice(None, None, port="ASYNC-CONN-JOIN")]
-    )
+    backend = FakeBackend([SimulatedDevice(None, None, port="ASYNC-CONN-JOIN")])
     with use_fake_backend(backend):
         facade = SerialForge()
         facade.configure(
@@ -1349,9 +1341,7 @@ def test_scan_async_callback_can_start_the_next_scan() -> None:
                 probe_pattern="READY",
                 serial=SerialConfig(settle_time_s=0),
             )
-            second.add_done_callback(
-                lambda again: results.append(len(again))
-            )
+            second.add_done_callback(lambda again: results.append(len(again)))
 
         first = facade.scan_async(
             baudrates=[115200],

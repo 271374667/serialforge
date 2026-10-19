@@ -161,7 +161,20 @@
 - 校验命令：`python .agents/tools/newdoc.py check --root <项目根>`
   （检查编号重复、引用断链、空 `_archive`）。
 
-## 7. 已有文件的整理（规范化存量文档）
+## 7. 公开文档文风（docs/ 站点与 README）
+
+- 读者默认“会 Qt、第一次接触串口和上位机”。专业术语首次出现时给一句人话解释，或链接
+  `docs/appendix/glossary.md` 的锚点；不要假设读者懂波特率、帧、回显、DTR。
+- 少用模板化排比和空话：不写“XXX 只做一件事”“不是 A，而是 B”“先放一边”“不只是……
+  更是……”这类句式；用自然的连接词把上下文接起来。
+- 复杂概念先用比喻或具体场景展开，再给规则和代码；不要一上来堆抽象名词。
+- Qt 应用由使用方创建并从自己的绑定导入（`PySide6.QtCore` / `PyQt6.QtCore` /
+  `PyQt5.QtCore`）；公开文档不要教用户从 `serialforge.qt_core` 导入 Qt 类。
+  仓库示例为兼容三套 CI 可使用 `examples/qt_app.py` 垫片，但需注明“真实项目直接导入”。
+- 入门页控制篇幅，只留“最快跑通”的路径；长表格、边界条件和高级参数放
+  `docs/advanced/` 对应功能页。
+
+## 8. 已有文件的整理（规范化存量文档）
 
 规范化项目时若发现已有 `README.md`、`docs/`、 issue 复盘、`TODO.md`、`.cursor/rules` 等：
 

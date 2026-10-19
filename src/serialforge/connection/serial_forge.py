@@ -117,7 +117,11 @@ class SerialForge(QObject):
                 )
             _CORE_APPLICATION = QCoreApplication([])
             app = _CORE_APPLICATION
-        if app is None or QThread.currentThread() != app.thread():
+        if app is None:
+            raise ConfigError(
+                "create QApplication or QCoreApplication before SerialForge"
+            )
+        if QThread.currentThread() != app.thread():
             raise ConfigError(
                 "create SerialForge on the Qt application main thread"
             )

@@ -43,6 +43,52 @@ assert not any(name.endswith(('.QtGui', '.QtWidgets')) for name in sys.modules)
     assert result.returncode == 0, result.stderr
 
 
+@pytest.mark.parametrize(
+    ("api", "module"),
+    [
+        ("pyside6", "PySide6.QtCore"),
+        ("pyqt6", "PyQt6.QtCore"),
+        ("pyqt5", "PyQt5.QtCore"),
+    ],
+)
+def test_serial_forge_reuses_host_application(api: str, module: str) -> None:
+    """Accept a QApplication/QCoreApplication created by the host binding."""
+    if importlib.util.find_spec(module.split(".", 1)[0]) is None:
+        pytest.skip(f"{module} is not installed")
+    result = run(
+        f"""
+import importlib
+from serialforge import SerialForge
+
+core = importlib.import_module({module!r})
+app = core.QCoreApplication([])
+forge = SerialForge()
+print(forge.state.value)
+forge.disconnect()
+""",
+        api,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "disconnected" in result.stdout
+
+
+def test_serial_forge_requires_existing_application() -> None:
+    """Fail clearly when the host has not created its Qt application yet."""
+    result = run("""
+from serialforge import SerialForge
+from serialforge.errors import ConfigError
+
+try:
+    SerialForge()
+except ConfigError as error:
+    text = str(error)
+    assert "QApplication" in text and "QCoreApplication" in text
+else:
+    raise AssertionError("SerialForge must require an existing Qt application")
+""")
+    assert result.returncode == 0, result.stderr
+
+
 @pytest.mark.parametrize("api", ["pyside2", "invalid"])
 def test_invalid_binding_selection_raises(api: str) -> None:
     """Reject unsupported or unknown selections before initializing

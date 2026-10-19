@@ -76,7 +76,7 @@ from tests.support import (
     use_fake_backend,
 )
 
-# 设备的 USB 身份与工作波特率：示例用它们拼 DeviceProfile。
+# 设备的 USB 身份与工作波特率：示例把它们直接交给 scan_async。
 VID_PID: Final = ((0x067B, 0x23A3),)
 BAUD_RATE: Final = 115200
 

@@ -10,12 +10,26 @@ docs_dir: docs
 site_dir: outputs/04_docs_site
 
 nav:
-  - 首页: index.md
-  - 快速开始: getting-started.md
-  - 使用指南: usage.md
-  - 示例: examples.md
+  - 新手入门:
+      - 项目介绍: index.md
+      - 快速开始: beginner/getting-started.md
+      - 简单示例: beginner/examples.md
+  - 进阶指南:
+      - 总览: advanced/index.md
+      - 声明与响应模式: advanced/declarations.md
+      - 发送、回调与取消: advanced/sending.md
+      - 扫描与连接: advanced/scan-connect.md
+      - 原始接收与日志: advanced/receiving.md
+      - 流式与主动上报: advanced/stream-events.md
+      - 接收定界与编码: advanced/framing.md
+      - 生命周期与重连: advanced/lifecycle.md
+      - 错误与诊断: advanced/errors.md
+      - 完整示例: advanced/examples.md
   - API 参考: api.md
   - 平台与限制: platform.md
+  - 附录:
+      - 串口入门: appendix/serial-primer.md
+      - 术语表: appendix/glossary.md
 
 theme:
   name: material
@@ -23,7 +37,10 @@ theme:
   features:
     - navigation.instant
     - navigation.tracking
+    - navigation.tabs
+    - navigation.tabs.sticky
     - navigation.sections
+    - navigation.indexes
     - navigation.top
     - content.code.copy
     - search.suggest

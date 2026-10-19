@@ -1,87 +1,76 @@
 # serialforge
 
-> 适用版本: 0.0.1  |  公共 API 改造 R1–R5（真机验证矩阵仍未完成）
+> 写给那些懂 Qt、却第一次接手串口通信，或者已经被串口多线程虐过千百遍的你。
 
-`serialforge` 是面向 Windows 10/11 x64 应用的 QtCore 串口通讯库。库只依赖 QtCore 的信号、槽和线程，
-提供设备发现、命令调度、自动重连和流量日志；库内不含任何具体设备业务命令，业务命令由使用方声明。
-日常操作统一通过 `SerialForge` 门面完成：声明、扫描、连接、发送与观察信号都在同一个对象上。
+你在 Qt 里画好了界面，按钮摆得整整齐齐，信号槽也接得赏心悦目。老板突然抱来一块电路板插进电脑：“来，点这个按钮，让板子亮个灯，顺便把温度读上来。”
 
-## 推荐用法
+你满口答应，翻出 `pyserial` 开始写代码。半小时后，你很可能会遭遇以下“串口下马威”：
 
-三步固定下来，协议里的命令表与代码骨架一一对应：
+1. **界面卡成PPT**：你直接在按钮点击事件里调了 `serial.read()`，然而设备慢悠悠过了 500 毫秒才回包，这半秒钟里你的窗口整个发白，标题栏写着刺眼的“未响应”。
+2. **字节是一盆乱炖**：串口没有“行”的概念，它是一根流式水管。你以为发一条命令就能整整齐齐读回一行文本，结果第一次读出来半截，第二次读出来后半截连带着下一次的开头。
+3. **复读机与插嘴怪**：有些设备喜欢回显——你发 `PING`，它先冲你学一句 `PING`，再给你回 `PONG`；还有些设备会在你发命令的当口，冷不丁自己上报一条 `ALARM: HIGH TEMP`，把你的正常回包顶到了九霄云外。
+4. **找不到设备在哪个口**：电脑上一口气挂了 4 个 COM 口，你不知道板子到底插在 COM3 还是 COM8，只能让用户在下拉框里一个个手选。
 
-1. **声明集中一处**：建好 `SerialForge` 后立刻把命令全部 `add(...)` 存成属性，每个命令只创建一次。
-2. **发送与消费写在同一个函数里**：`send_async(命令).add_done_callback(闭包)`，闭包在主线程直接改控件。
-3. **扫描即配置，连接用扫描结果**：`scan_sync(baudrates=[...], probe=命令)` → `connect_sync(devices[0])`。
+**serialforge 就是为了替你摆平这些脏活而写的。**
+
+你只需要像写菜单一样声明业务：“我发这条命令，它应该回长成这样的正则，请帮我解析好”。接下来的事情——后台独立线程读写、按行或静默间隔分帧、正则匹配提取、数据类型转换、超时监控、故障隔离，以及**把结果完好无损地送回 Qt 主线程**——统统交给库来处理。
+
+---
+
+## 30 秒尝鲜
+
+假设你的板子很简单：发一句 `PING`，回一句 `PONG`。
 
 ```python
-self.forge = SerialForge()
+from PySide6.QtCore import QCoreApplication
+from serialforge import SerialForge
 
-# ① 声明集中一处：加命令只改这一段
-self.VERSION = self.forge.add(
-    request=">SN_INFO_GET=?",                    # request 不用自己写 CRLF
-    pattern=r">SN_INFO_GET=(?!\?)(?P<sn>.+)",    # 负向预查排除回显
-)
+# 1. 创建 Qt 核心应用与门面（GUI 界面直接复用现有的 QApplication 即可）
+app = QCoreApplication([])
+forge = SerialForge()
 
-# ② 发送 + 闭包在同一函数内，闭包捕获控件
-def on_query(self):
-    def on_done(message: Message[str]) -> None:
-        self.output.setText(str(message.data))
+# 2. 声明一条命令（不用操心 \r\n 换行符，库会自动补齐与剔除）
+PING = forge.add(request="PING", pattern=r"PONG")
 
-    self.forge.send_async(self.VERSION).add_done_callback(on_done)
+# 3. 扫描附近的端口，挨个拿 PING 去敲门，看谁会礼貌回 PONG
+devices = forge.scan_sync(baudrates=[115200], probe=PING)
+if not devices:
+    raise SystemExit("敲遍了所有 COM 口，没有设备理我")
 
-# ③ 波特率与探针一次给全，用扫描返回值连接
-def on_connect(self):
-    devices = self.forge.scan_sync(baudrates=[921600], probe=self.VERSION)
-    if devices:
-        self.forge.connect_sync(devices[0])
+# 4. 连接找到的第一个设备，发送指令并拿到结果
+forge.connect_sync(devices[0])
+response = forge.send_sync(PING)
+
+print("设备回复:", response.data[0])  # 'PONG'
+
+forge.disconnect()
 ```
 
-回调统一排队到 Qt 应用主线程，因此可以放心在闭包里改界面；默认期限 3 秒，超时或失败**不调用**成功回调。
-`scan_sync()` 与 `connect_sync()` 会阻塞；界面应用可用 `scan_async()` / `connect_async()` 的闭包，
-或把它们放到自己的工作线程。
-完整说明见[快速开始](getting-started.md) 与[使用指南](usage.md)。
+上面这段是同步写法，非常适合在控制台脚本或单独的工作线程里跑。
 
-## 特性
+如果是在带界面的 GUI 程序里，只要把 `_sync` 换成对应的 `_async`，再挂一个 `add_done_callback` 闭包就行。回调函数百分之百在 Qt 主线程里触发，拿到数据直接调用 `label.setText()`，主线程一毫秒都不会卡。
 
-- **门面 API**：`SerialForge` 覆盖声明、同步/异步扫描与连接、同步与异步发送，一个对象走完流程。
-- **声明集中且身份稳定**：统一 `Spec` 冻结、`eq=False`，`add()` 返回原对象，回调里用 `message.spec is SPEC` 分发。
-- **主线程闭包**：`send_async(...).add_done_callback(consume)` 的回调排队到 Qt 应用主线程，直接更新界面。
-- **设备发现**：给波特率与探测命令即可 `scan_sync()`，逐个尝试候选波特率并缓存已成功的组合。
-- **命令调度**：队列、优先级、超时、多行与流式响应的收齐规则由库处理。
-- **自动重连与心跳**：掉线后按退避策略重连，可配置心跳探测与重连后的重新识别。
-- **流量日志**：库内日志只走 loguru DEBUG，默认静默；可按连接落盘并限制文件数量与体积。
-- **导入无副作用**：`import serialforge` 不创建 Qt 应用、线程、文件或日志 sink。
+---
 
-## 环境要求
+## 它帮你搞定了哪些糟心事
 
-| 项目 | 要求 |
-| --- | --- |
-| 操作系统 | Windows 10/11 x64 |
-| Python | 3.11–3.14（64 位） |
-| 运行时依赖 | `pyserial>=3.5`、`loguru>=0.7`；Qt extra 选 PySide6-Essentials>=6.11.2、PyQt6>=6.11 或 PyQt5>=5.15.11 |
+- **智能敲门寻机**：给定一组候选[波特率](appendix/glossary.md#baudrate)，用预设的[探针](appendix/glossary.md#probe)自动探测。知道芯片的 USB [VID/PID](appendix/glossary.md#vid-pid) 还能先过滤无关端口，避免把时间浪费在无辜的蓝牙串口上。
+- **自动分包断句**：串口数据流水一般涌来，库负责根据换行符或静默停顿切出完整的[帧](appendix/glossary.md#frame)，拼装好再交给你。
+- **正则与数据绑定**：支持用命名正则捕获组提取数据。你可以直接指定 `result_type=int`、`float`、`dict`，甚至是自定义的 `@dataclass`，免去手工切字符串的繁琐。
+- **绝对的主线程安全**：无论底层的串口读取线程多忙碌，交付给你的回调与信号全部排队投递到 Qt 主线程，更新界面不需要自己琢磨线程锁。
+- **干净的错误与超时**：命令发出后默认 3 秒期限，超时自动清理现场，绝不让迟到的幽灵数据窜到下一条指令里。
 
-Qt 下限 6.11.2 是当前通过完整测试套件的保守值：更早的 Qt 绑定存在信号 `connect` 与兼容
-`SerialHandler.connect` 的名称冲突（新门面已改用 `connect_sync`/`connect_async`），中间版本未逐一验证。
+---
 
-## 安装
+## 接下来去哪
 
-项目目前的验收方式是从构建产物安装；发布到包索引后可直接按名称安装：
+如果你刚拿到硬件，很多概念还摸不着头脑：
+- 先花几分钟翻翻 [串口与上位机入门](appendix/serial-primer.md)，把上位机、波特率、CRLF 这些概念建立起清晰的图景。
+- 看代码遇到不懂的词，随时查阅 [术语表](appendix/glossary.md)。
 
-```powershell
-# 从本地构建的 wheel 安装（在解释器或项目环境中执行）
-uv add ./serialforge-0.0.1-py3-none-any.whl --extra pyside6
-
-# 发布到索引之后
-uv add "serialforge[pyside6]"  # 或 serialforge[pyqt6] / serialforge[pyqt5]
-```
-
-wheel 与 sdist 只包含 `src/serialforge`，不含测试替身、`tests`、`examples` 或字节码。
-
-## 下一步
-
-- [快速开始](getting-started.md)：把推荐用法跑成一段完整代码
-- [使用指南](usage.md)：声明、发送、闭包消费、扫描连接、定界与日志
-- [示例](examples.md)：`examples/` 下的可运行脚本（本页代码即取自它们）
-- [API 参考](api.md)：统一日常接口、19 名字过渡期与进阶 API
-- [平台与限制](platform.md)：Windows 范围与真机验证边界
+如果你准备开始动手：
+- [快速开始](beginner/getting-started.md)：5 分钟完整跑通第一个工程。
+- [简单示例](beginner/examples.md)：同步与异步两个极简短脚本。
+- [进阶指南](advanced/index.md)：按功能深入了解多行响应、流式采集、主动上报与错误诊断。
+- [完整示例](advanced/examples.md)：直接运行免硬件的五种通信模式与交互控制台 Demo。
+- [API 参考](api.md)：所有类、方法、参数签名与默认值速查。

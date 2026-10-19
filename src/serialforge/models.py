@@ -170,8 +170,8 @@ class CommandSpec:
 
     Note:
         Frozen with identity equality: register and reuse this exact object.
-        See examples/quick_start.py for an executable declaration and send
-        workflow.
+        See examples/simple/first_command.py for an executable declaration
+        and send workflow.
 
     Raises:
         CommandError: If the declaration is inconsistent or invalid.

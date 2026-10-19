@@ -58,7 +58,14 @@ def run_example(
 
 
 @pytest.mark.parametrize(
-    "name", ["quick_start.py", "auto_connect.py", "async_callbacks.py"]
+    "name",
+    [
+        "simple/first_command.py",
+        "simple/async_callback.py",
+        "advanced/quick_start.py",
+        "advanced/auto_connect.py",
+        "advanced/async_callbacks.py",
+    ],
 )
 def test_examples_run_without_hardware(name: str) -> None:
     """Keep every no-hardware example executable as a standalone script."""
@@ -70,7 +77,7 @@ def test_examples_run_without_hardware(name: str) -> None:
 
 def test_interactive_example_answers_every_command() -> None:
     """Drive the console example through one round of every command."""
-    completed = run_example("interactive.py", INTERACTIVE_INPUT)
+    completed = run_example("advanced/interactive.py", INTERACTIVE_INPUT)
 
     assert completed.returncode == 0, completed.stdout + completed.stderr
     assert "状态=ok" in completed.stdout
@@ -80,7 +87,8 @@ def test_interactive_example_answers_every_command() -> None:
     assert "[流]" in completed.stdout
     assert "[上报]" in completed.stdout
     assert "[报警]" in completed.stdout
-    assert "[未识别帧]" in completed.stdout
+    # received 只发非空原始字节；未识别回包同样按原始行打印。
+    assert "[原始]" in completed.stdout
 
 
 def test_readme_python_examples_are_executable() -> None:

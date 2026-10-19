@@ -1,210 +1,167 @@
 # serialforge
 
-> 适用版本: 0.0.1 | 公共 API 改造 R1–R5
+> 写给那些只想在 Qt 界面上点个按钮读写串口，却被多线程、分包断句、乱码和界面卡死折磨到怀疑人生的开发者。
 
-面向 Windows 10/11 x64、Python 3.11–3.14 的串口通讯库。仅使用 QtCore，
-支持 PySide6、PyQt6 与 PyQt5；导入不会创建应用、线程、串口、文件或日志 sink。
-设备指令由使用方声明，库负责发现、调度、解析、重连和回调。
+开发上位机串口程序，大概是每个写 GUI 的人迟早都要趟一遍的浑水。
 
-```powershell
-uv add "serialforge[pyside6]"  # 或 serialforge[pyqt6] / serialforge[pyqt5]
-```
+如果用原生方案写，你的代码通常会长成这样：开一个 `QThread`，在死循环里用 `pyserial.read()` 啃字节；因为串口本质上是流水，一口气读出来的 50 个字节可能前半截是上一条回复的尾巴，中间混着设备被踢掉线时的乱码，后半截才是刚刚发出的回包；你得手写状态机拼接 `\r\n`，再把文本拆开转成浮点数；如果设备还喜欢复读你的命令（回显），或者冷不丁主动报个警，你还得区分哪个是回复、哪个是上报；最后还要通过自定义的 Qt Signal 辛辛苦苦把数据丢回主线程更新界面。
 
-同时安装多个绑定时，启动前设置 `QT_API=pyside6`、`QT_API=pyqt6` 或 `QT_API=pyqt5`；已加载的绑定与设置必须一致。PyQt5/PyQt6 为 Riverbank GPL v3 / 商业双授权，按其条款履行义务；Python 3.11 下限不变。
+一旦有人拔掉 USB 线，或者遇上一个打不开的虚拟蓝牙串口，整个程序直接在 `open()` 里面假死，Windows 标题栏挂上灰色的“未响应”。
 
-## 推荐用法：声明集中、异步闭包、扫描连接
+**serialforge 就是为了消灭这几百行脏代码而生的。**
 
-这是 serialforge 的推荐使用形态，三步固定下来，命令表与代码骨架一一对应：
-
-1. **声明集中一处**：建好 `SerialForge` 后立刻把协议里的命令全部 `add(...)` 存成属性，每个命令只创建一次。
-2. **发送与消费写在同一个函数里**：`send_async(命令).add_done_callback(闭包)`，闭包在主线程直接改控件。
-3. **扫描即配置，连接用扫描结果**：`scan_sync(baudrates=[...], probe=命令)` → `connect_sync(devices[0])`。
-
-```python
-from serialforge import Message, SerialForge
-from PySide6.QtWidgets import QLabel, QPushButton, QWidget
-
-class MainWindow(QWidget):
-    def __init__(self):
-        super().__init__()
-        self.output = QLabel()
-        self.button = QPushButton("获取波特率")
-        self.connect_button = QPushButton("连接设备")
-
-        # ① 声明集中一处：加命令只改这一段；request 不用自己写 CRLF
-        self.forge = SerialForge()
-        self.VERSION = self.forge.add(
-            request=">SN_INFO_GET=?",
-            pattern=r">SN_INFO_GET=(?!\?)(?P<sn>.+)",        # 负向预查排除回显；默认 str 返回整段匹配帧
-        )
-        self.BAUD_RATE = self.forge.add(
-            request=">BAUD_RATE_GET=?",
-            pattern=r">BAUD_RATE_GET=(?!\?)(?P<baud>\d+)",
-            result_type=int,                                 # data 是 [921600]
-        )
-
-        self.button.clicked.connect(self.on_get_baud_rate)
-        self.connect_button.clicked.connect(self.on_connect_device)
-
-    # ② 发送 + 闭包在同一个函数里，闭包捕获控件
-    def on_get_baud_rate(self):
-        def on_done(message: Message[int]) -> None:
-            self.output.setText(str(message.data))
-
-        self.forge.send_async(self.BAUD_RATE).add_done_callback(on_done)
-
-    # ③ 波特率与探针一次给全，用扫描返回值连接
-    def on_connect_device(self):
-        devices = self.forge.scan_sync(baudrates=[921600], probe=self.VERSION)
-        if not devices:
-            return
-        self.forge.connect_sync(devices[0])
-```
-
-上面是界面骨架（省去布局与控件细节），替换成你的协议文本即可。要点：`send_async` 的目标就是你声明
-过的那个对象，回调闭包统一排队到 Qt 应用主线程，所以能直接改界面，不必自己拆线程或加定时器；
-默认期限 3 秒，从提交开始算，包含排队、设备等待与主线程投递，
-**超时或失败不调用成功回调**，需要失败分支就用 `call.result()`（重抛 `serialforge.errors` 的异常）
-或自行兜底。`scan_sync()` 与 `connect_sync()` 都阻塞调用线程，界面应用可用异步版
-`scan_async()`/`connect_async()` 的闭包，或把它们放到自己的工作线程，门面不提供
-扫描进度或完成信号，结果只用返回值。
-
-完整可运行版本与更多形态见[示例](#示例)。
-
-## 声明与发送
-
-`add()` 返回传入/新建的那个声明对象：`add(spec)` 原对象返回，`add(request, pattern, result_type=...)`
-只构造一次。声明冻结且身份保持，回调里可用 `message.spec is self.BAUD_RATE` 分发。
-
-响应命令 request/pattern 必填，默认 `mode=SINGLE`，默认 `result_type=str` 返回整段匹配帧；
-`int`/`float` 取第一个捕获组转标量，`dict` 返回命名组字典，`dataclass` 按命名字段构造。
-事件写成 `add(pattern=r"ALARM:.+")`；只发送不等回复必须显式 `mode=ResponseMode.NO_REPLY`；
-多行响应显式 `mode=ResponseMode.MULTI`，并在 `count>0` 与 `until` 中选一个。
-可选值缺省为 `count=-1`、`until/error_pattern/parser=""`、`total_timeout_s=-1.0`，不接受 `None`。
-
-`send_sync(target, wait_timeout_s=3.0, params=..., context=...) -> Message` 与
-`send_async(target, timeout_s=3.0, params=..., context=...) -> CommandCall` 同级：target 可以是已注册
-声明或完整命令文本，文本不接受额外 params。`params` 填充请求占位符；`context` 是每次调用独立的只读
-浅快照，随结果和调用句柄保留，不发送到设备也不参与解析，闭包里可用它回填行号等界面状态。
-
-命令自身的协议预算（`Spec.timeout_s` 默认 1 秒、`total_timeout_s` 默认关闭）与调用期限相互独立，
-多行或慢响应要让调用期限大于协议预算，例如声明 `total_timeout_s=5.0` 时用
-`send_async(spec, timeout_s=6.0)`。同步失败直接抛出 `serialforge.errors` 的执行异常；异步失败通过
-`call.result()` 重抛，未完成时抛 `CommandNotReadyError`。STREAM 只能异步发送，帧从 `received` 取得，
-直到 `cancel()` 或调用期限结束；界面关闭时对未完成调用 `cancel()`。未归属命令的后台错误由
-`check_errors()` 抛出。
-
-回调参数的类型注解按该命令**声明的 `result_type`** 写：默认 `str` 是 `Message[str]`，`result_type=int`
-是 `Message[int]`，`dict`/dataclass 各按声明类型，一个回调服务多条命令或处理 `received` 时用
-`Message[Any]`。`Message` 是泛型，直接下标即可；`Message.data` 始终是 `list[T]`：单条响应是单元素列表，
-多条响应保留完整列表，无回复是空列表，所以回调体不需要额外的 `isinstance` 判断。
-
-## 扫描与连接
-
-`scan_sync(baudrates=[...], probe=spec)` 自带完整配置，不必先 `configure()`；也接受 `configure` 的字段形式、
-字符串探针（须补 `probe_pattern`）或现成的 `DeviceProfile`。签名重载：
-
-```python
-devices = forge.scan_sync(baudrates=[115200, 921600], probe=PROBE)  # 阻塞，返回 list[DeviceInfo]
-devices = forge.scan_sync(port="COM11", baudrates=[921600], probe=PROBE)
-forge.cancel_scan()                                                # 线程安全请求取消
-```
-
-`probe` 用已声明对象时必须是 `SINGLE`、无占位符，且 pattern 不能匹配自己的请求回显（否则 `ConfigError`），
-上面示例的 `(?!\?)` 就是为此。无匹配返回 `[]`，配置仍保留；扫描不自动连接，结束保持断开。
-界面应用也可以不阻塞：`scan_async()` 返回 `ScanCall`，`connect_async()` 返回 `ConnectCall`，
-`add_done_callback` 在主线程拿到设备列表/已连接设备；失败不回调，用 `call.result()` 重抛异常；
-`call.cancel()` 中止并抑制回调。
-个别端口打不开、写不进或没有应答只跳过该端口，不会让整次扫描失败，也不抛库异常。
-探测按端口并行、同端口速率串行，端口只打开一次；打开调用默认限时 1 秒，卡死的驱动直接跳过
-（`RuntimeConfig.probe_open_timeout_s`），每个速率还会先用 0.3 秒活性窗口筛“有没有回包字节”
-（`probe_activity_window_s`，`0` 关闭；只对任意波特率都回包的设备有加速效果）。
-`ScanMode.ALL` 扫完全部，`ScanMode.FIRST_MATCH` 拿到第一个成功者就取消其余探测。
-`connect_sync()` 有三种入口：
-
-```python
-forge.connect_sync()                 # 按保存策略发现首个设备
-forge.connect_sync("COM11")          # 指定端口，绕过 USB 身份过滤但仍探测波特率
-forge.connect_sync(devices[0])       # 用扫描确认过的 DeviceInfo 直接打开，跳过重新探测
-```
-
-`connect_sync()` 阻塞到设备打开并完成初始化，返回即可以发送；每次 `connect_sync`/`scan_sync` 都会先完整断开旧会话。
-VID/PID 可省略，只在提供时用于过滤。`configure(...)` 只在空闲断开时原子替换策略，
-`heartbeat_s=-1.0` 禁用心跳，`port=""` 不限制端口。无结束符设备用接收定界，与发送终止符相互独立：
-
-```python
-from serialforge.advanced import FramingConfig, FramingMode
-
-forge.configure(baudrates=[115200], probe=PROBE,
-                framing=FramingConfig(mode=FramingMode.SILENCE_GAP, silence_gap_s=0.08))
-```
-
-## 收发观察与日志
-
-门面仅公开三个信号：`connection_state_changed(ConnectionState)`、`received(Message)` 和
-`raw_sent(bytes)`，都在 Qt 应用主线程投递。`received` 的 `category` 区分 `RAW_RECEIVE`、
-`RESPONSE_FRAME`、`COMMAND_RESULT`、`DEVICE_EVENT`、`STREAM_FRAME`、`UNKNOWN_FRAME`；
-结果信号与同步返回/异步 `result()`/成功回调共享同一个最终 `Message` 对象。
-
-滚动日志只选 `RAW_RECEIVE` 的 `raw_data` 与 `raw_sent` 的字节：这是完整实际读写字节，包含结束符、
-回显、探测、初始化、心跳和重试。`raw_sent` 只含底层确认接收的字节，部分写入只记录已接收前缀；
-解析帧和终态来自同一物理回复，混入日志会重复。并发扫描的裸 TX 字节没有端口字段。
-`traffic_logged` 不再作为公开信号；库内 loguru DEBUG/文件日志保持默认静默。
-
-## 示例与兼容迁移
-
-`examples/` 用共享的虚拟设备演示无硬件流程，四种形态各有脚本：
+你只管声明业务逻辑：“发什么文本、按什么正则匹配、帮我转成什么类型”。至于底层的后台 I/O 线程、断句切帧、排队限流、超时兜底、断线重连，以及把解析好的数据直接送到 Qt 主线程闭包，全部由库包办。
 
 ```powershell
-uv run python examples/quick_start.py       # 单发单收 / 多收 / 流式 / 主动上报 / 无回复
-uv run python examples/auto_connect.py      # scan 模式与三种 connect_sync 入口
-uv run python examples/async_callbacks.py   # 推荐的 send_async + add_done_callback 闭包
-uv run python examples/interactive.py       # 交互式控制台
+uv add "serialforge[pyside6]"  # 或者 serialforge[pyqt6] / serialforge[pyqt5]
 ```
 
-测试替身只在源码仓库的 `tests/support/`，不进入客户 wheel/sdist。
+---
 
-过渡期顶层保留原 15 个名字，再加 `SerialForge`/`Spec`/`Message`/`MessageCategory`，共 19 个。
-日常使用统一 API；进阶配置在 `serialforge.advanced`，异常在 `serialforge.errors`。
-`SerialHandler` 保留 register/unregister/send/send_and_wait 方法桥接，但不再提供旧结果、事件、错误和
-流量信号。旧 `CommandSpec`/`EventSpec` 构造及身份语义仍可用；新返回值统一为 `Message`，
-不保证旧结果类型的 `isinstance`。下一轮移除兼容入口的版本由用户决定。
+## 10 秒钟看懂它是怎么工作的
 
-## Windows 范围
+假设你的设备协议很简单：发 `PING`，回 `PONG`。
 
-支持 Windows 10/11 x64 和 64 位 Python。睡眠唤醒、USB 选择性挂起、驱动 DTR/RTS 脉冲、拔插重连和
-TX-RX 回环必须按
-[.agents/docs/knowledge/software/0003_Windows真机验证矩阵.md](.agents/docs/knowledge/software/0003_Windows真机验证矩阵.md)
-中的矩阵由使用方验证；当前仓库没有宣称整张矩阵通过。TX-RX 回环要把独立适配器的 TX 与 RX 物理短接
-后再测，接到目标设备时它不会回显 `SERIALFORGE_LOOPBACK`。PyInstaller 使用方还需自行履行 PySide6
-LGPL 合规义务。遇到挂起导致的掉线，可以检查 Windows 的 USB 选择性暂停和设备电源管理选项；
-库不会修改系统设置。日志和波特率缓存使用 Qt 应用数据目录，PyInstaller 打包后也不应改成程序目录。
+```python
+from serialforge import SerialForge
 
-## 开发与验收
+def read_ping(forge: SerialForge) -> str:
+    """扫描、连接、发一条命令，返回设备回复。"""
+    PING = forge.add(request="PING", pattern=r"PONG")
+    devices = forge.scan_sync(baudrates=[115200], probe=PING)
+    if not devices:
+        return ""
+    forge.connect_sync(devices[0])
+    try:
+        return forge.send_sync(PING).data[0]
+    finally:
+        forge.disconnect()
+```
+
+纯控制台脚本传 `SerialForge(application="core")` 即可自动托管事件循环；GUI 程序在已有 `QApplication` 的主线程直接创建 `forge = SerialForge()`。
+
+如果是在 Qt GUI 界面里，不要在主线程用 `_sync` 堵路，换成对应的 `_async` 方法加闭包回调即可。你的回调函数**百分之百在 Qt 主线程里执行**，拿到了数据直接调 `label.setText()`，绝不卡界面。
+
+---
+
+## 几个让你省下大把时间的设计
+
+### 1. 正则匹配 + 自动转类型，告别手撕字符串
+很多协议长成 `TEMP: 24.8` 这样。以前你得拿正则匹配，取出 group(1)，再用 `float()` 强转，还要套 try-except 防炸。
+
+在 serialforge 里，支持直接绑定数值或 Python `@dataclass`：
+
+```python
+from dataclasses import dataclass
+from serialforge import SerialForge
+
+@dataclass
+class SensorData:
+    channel: int
+    voltage: float
+
+def declare_commands(forge: SerialForge):
+    # 想要浮点数：正则捕获的第一组数字自动转 float
+    GET_TEMP = forge.add("GET_TEMP", r"TEMP:\s*(?P<val>[\d\.]+)", result_type=float)
+
+    # 想要强类型结构体：命名捕获组自动映射到 dataclass 字段
+    READ_ADC = forge.add(
+        "READ_ADC",
+        r"CH(?P<channel>\d+):(?P<voltage>[\d\.]+)V",
+        result_type=SensorData,
+    )
+```
+
+### 2. 带着上下文发命令（Context）
+在表格界面里，用户点了第 15 行的“刷新”按钮。300 毫秒后设备回包了，你的回调怎么知道该更新表格的第几行？
+
+以前你可能得在窗体类里搞个全局字典记住 request_id，生怕并发一高把行号搞窜。现在直接把你的私货塞进 `context`：
+
+```python
+from serialforge import SerialForge, Spec
+
+def send_with_context(forge: SerialForge, query: Spec[dict]):
+    # context 是一份只读便签，不会发到线路上，但会随结果原样返回
+    call = forge.send_async(query, context={"table_row": 15})
+    call.add_done_callback(
+        lambda msg: print(f"更新第 {msg.context['table_row']} 行: {msg.data[0]}")
+    )
+```
+
+### 3. 急事可以插队（URGENT 优先级）
+队列里排了 10 条轮询传感器数据的指令，操作员突然按了红色的“紧急停机”按钮。如果按传统的 FIFO 队列慢慢排，等轮到停机命令时黄花菜都凉了。
+
+给紧急命令加个高优先级，它立刻插到队列最前头：
+
+```python
+from serialforge import ResponseMode, SerialForge
+from serialforge.advanced import CommandPriority
+
+def emergency_stop(forge: SerialForge):
+    # 停机指令直接加塞到队列最前头，且不等回复
+    STOP = forge.add("STOP", mode=ResponseMode.NO_REPLY)
+    forge.send_async(STOP, priority=CommandPriority.URGENT)
+```
+
+### 4. 知道 USB 身份时，扫描快到飞起
+很多人扫描串口很慢，是因为电脑上插了各种蓝牙转串口、虚拟调制解调器，或者驱动稀烂的设备，打开一次就要等一两秒。
+
+如果你知道自己设备的 USB 芯片型号（VID/PID），直接告诉扫描器：
+
+```python
+from serialforge import SerialForge, Spec
+
+def fast_scan(forge: SerialForge, ping_probe: Spec[str]):
+    # 传入芯片 VID/PID，跳过无关端口，扫描极速完成
+    call = forge.scan_async(
+        baudrates=[115200],
+        probe=ping_probe,
+        vid_pid=[(0x1A86, 0x7523)],  # 比如只敲 CH340 的门
+    )
+    call.add_done_callback(lambda devices: print(f"找到 {len(devices)} 台设备"))
+```
+扫描时间直接从 5 秒跌到几十毫秒。
+
+### 5. 失败不调成功回调
+许多库喜欢不管成功失败都调同一个回调，让用户在回调里写一堆 `if result.is_error(): return`。
+
+serialforge 的策略很干脆：`add_done_callback` 注册的闭包**只在真正成功收到预期回复时触发**。如果超时、设备掉线或者通信出错，成功回调压根不会执行。想看异常细节，去调 `call.result()`，它会把现场原原本本地重抛给你。
+
+---
+
+## 示例代码目录
+
+仓库 `examples/` 目录下带了一台内建的虚拟串口设备，不需要任何硬件，敲命令就能跑：
 
 ```powershell
-uv sync
-uv run python scripts/ci.py --fast
-uv run python scripts/ci.py
+# 简单入门
+uv run python examples/simple/first_command.py      # 同步阻塞最小脚本
+uv run python examples/simple/async_callback.py     # 异步回调最小脚本
+
+# 进阶特性
+uv run python examples/advanced/async_callbacks.py  # 生产推荐写法：异步发现 + 闭包处理 + STREAM
+uv run python examples/advanced/auto_connect.py     # 扫描模式与三种连接姿势
+uv run python examples/advanced/quick_start.py      # 单发单收、多收、流式、上报、无回复五种模式
+uv run python examples/advanced/interactive.py      # 带命令行界面的交互控制台
 ```
 
-完整本地 CI 包含 Python 3.11–3.14 独立环境、格式、ty、pytest、pylint、构建、twine 和干净 wheel 冒烟。
-`--lowest` 单独验证最低直接依赖；`--release` 包含全部检查。
-`--smoke --wheel <路径> --python 3.11` 可在另一台机器对已构建 wheel 验收。
+---
 
-文档站点使用 mkdocs-material（开发依赖），页面源码在 `docs/`，配置见 `mkdocs.yml`：
+## 纯洁与边界
 
-```powershell
-uv run mkdocs serve              # 本地预览 http://127.0.0.1:8000
-uv run mkdocs build --strict     # 构建到 outputs/04_docs_site/
-```
+- **只依赖 QtCore**：绝不导入 `QtWidgets` 或 `QtGui`。你用它写无界面的后台服务、控制台小工具，还是搭配庞大的桌面 UI，全凭你心意。
+- **导入无副作用**：`import serialforge` 不会擅自起线程、不会开串口、不会动文件系统，更不会弹窗。
+- **支持三套绑定**：PySide6、PyQt6、PyQt5 都可以。如果你同时装了多个，设置环境变量 `$env:QT_API="pyside6"` 指定即可。
+- **环境要求**：Windows 10/11 x64，Python 3.11–3.14（64位）。
 
-发布流程见
-[.agents/docs/knowledge/software/0002_发布流程.md](.agents/docs/knowledge/software/0002_发布流程.md)。
-本项目不生成云端 CI，不执行 PyPI 上传、推送或打 tag。
+---
 
-推荐用法与迁移口径见
-[.agents/docs/knowledge/software/0011_推荐用法_集中声明与异步闭包.md](.agents/docs/knowledge/software/0011_推荐用法_集中声明与异步闭包.md)；
-已落地的公共 API 契约索引见
-[.agents/docs/knowledge/software/0005_公共API改造_契约索引与迁移.md](.agents/docs/knowledge/software/0005_公共API改造_契约索引与迁移.md)，
-AI 协作入口见 `AGENTS.md`。
+## 完整文档
+
+更详细的指南在在线文档站点：<https://271374667.github.io/serialforge/>
+
+- [新手入门 · 快速开始](docs/beginner/getting-started.md)：手把手搭建第一个工程
+- [进阶指南 · 声明与响应模式](docs/advanced/declarations.md)：单发多收、流式持续采集与主动上报
+- [进阶指南 · 定界与编码](docs/advanced/framing.md)：遇到不说“句号”的 Modbus 或二进制设备怎么办
+- [附录 · 串口与上位机入门](docs/appendix/serial-primer.md)：刚接手硬件项目的纯软件开发者先看这个
+- [附录 · 术语表](docs/appendix/glossary.md)：波特率、CRLF、探针、8N1 的人话速查

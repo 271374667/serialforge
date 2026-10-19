@@ -1,5 +1,6 @@
 """M4 facade contracts before M5 establishes a serial connection."""
 
+import sys
 import threading
 import time
 
@@ -64,6 +65,7 @@ def test_send_and_wait_rejects_qt_event_loop_thread() -> None:
     handler = make_handler()
     handler.register(VERSION)
     errors: list[CommandError] = []
+    loop = sys.modules[app.__class__.__module__].QEventLoop(app)
 
     def attempt() -> None:
         try:
@@ -71,11 +73,15 @@ def test_send_and_wait_rejects_qt_event_loop_thread() -> None:
         except CommandError as exc:
             errors.append(exc)
         finally:
-            app.quit()
+            loop.quit()
 
-    QTimer.singleShot(0, attempt)
-    QTimer.singleShot(1000, app.quit)
-    app.exec()
+    timer = QTimer(app)
+    timer.setSingleShot(True)
+    timer.timeout.connect(attempt)
+    timer.start(0)
+
+    loop.exec()
+    timer.stop()
     assert len(errors) == 1
     assert "event loop" in str(errors[0])
 
