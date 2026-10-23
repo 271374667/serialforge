@@ -260,9 +260,11 @@ def test_heartbeat_timeout_reconnects_and_manual_disconnect_stops() -> None:
         assert all(item.closed for item in backend.transports)
 
 
-@pytest.mark.parametrize("target", [None, "SIM21"])
-def test_discovery_connection_entry_points(target: str | None) -> None:
-    """Resolve a profile or named port before opening the live connection."""
+@pytest.mark.parametrize(
+    "target", [None, DeviceInfo(port="SIM21", baudrate=115200)]
+)
+def test_discovery_connection_entry_points(target: DeviceInfo | None) -> None:
+    """Resolve a profile or an explicit device before opening the connection."""
     app()
     backend = FakeBackend(
         [
@@ -286,13 +288,19 @@ def test_discovery_connection_entry_points(target: str | None) -> None:
         try:
             assert handler.state is ConnectionState.CONNECTED
             app().processEvents()
-            assert states[:3] == [
-                ConnectionState.PROBING,
-                ConnectionState.CONNECTING,
-                ConnectionState.CONNECTED,
-            ]
-            assert len(backend.transports) == 2
-            assert backend.transports[0].closed
+            expected = (
+                [
+                    ConnectionState.PROBING,
+                    ConnectionState.CONNECTING,
+                    ConnectionState.CONNECTED,
+                ]
+                if target is None
+                else [ConnectionState.CONNECTING, ConnectionState.CONNECTED]
+            )
+            assert states[: len(expected)] == expected
+            assert len(backend.transports) == (2 if target is None else 1)
+            if target is None:
+                assert backend.transports[0].closed
             handler.send(VERSION)
             wait_until(lambda: len(results) == 1)
             assert results[0].data == VersionInfo("1.02")
@@ -365,8 +373,8 @@ def test_no_matching_device_raises_before_connect_returns() -> None:
             handler.disconnect()
 
 
-def test_blocking_connect_to_named_port_trusts_identity_and_is_ready() -> None:
-    """Trust the named port even if its USB identity is outside the profile."""
+def test_blocking_connect_to_explicit_device_trusts_identity() -> None:
+    """Open an explicit device even if its USB identity is off-profile."""
     app()
     backend = RecordingBackend(
         [
@@ -382,12 +390,11 @@ def test_blocking_connect_to_named_port_trusts_identity_and_is_ready() -> None:
     with use_fake_backend(backend):
         handler = SerialHandler(profile())
         handler.register(VERSION)
-        handler.connect("NAMED")
+        handler.connect(DeviceInfo(port="NAMED", baudrate=115200))
         try:
             assert handler.state is ConnectionState.CONNECTED
             assert handler.send_and_wait(VERSION, timeout=2).ok
-            assert len(backend.transports) == 2
-            assert backend.transports[0].closed
+            assert len(backend.transports) == 1
             assert all(
                 tid != threading.get_ident() for _, _, tid in backend.attempts
             )

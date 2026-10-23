@@ -12,7 +12,7 @@ from serialforge.connection.command_registry import CommandRegistry
 from serialforge.connection.connection_worker import ConnectionWorker
 from serialforge.diagnostics import TrafficLogger
 from serialforge.enums import CommandStatus, ConnectionState, SendRoute
-from serialforge.errors import CommandError, SerialForgeError
+from serialforge.errors import CommandError, ConfigError, SerialForgeError
 from serialforge.models import (
     CommandResult,
     CommandSpec,
@@ -32,6 +32,37 @@ from serialforge.qt_core import QCoreApplication, QObject, Qt, QThread, Signal
 
 if TYPE_CHECKING:
     from serialforge.connection.command_dispatcher import CommandDispatcher
+
+
+def normalize_connect_target(
+    target: DeviceInfo | list[DeviceInfo] | None,
+) -> DeviceInfo | None:
+    """Normalize a connect target to one DeviceInfo or None.
+
+    Args:
+        target: A DeviceInfo is kept; an empty list means automatic
+            discovery (None); a non-empty list keeps its first entry.
+
+    Returns:
+        The resolved DeviceInfo, or None for automatic discovery.
+
+    Raises:
+        ConfigError: The target is neither DeviceInfo, list[DeviceInfo]
+            nor None. Port name strings are rejected because port names
+            change between sessions; pass a DeviceInfo obtained from
+            SerialForge.list_devices or a scan instead.
+    """
+    if target is None:
+        return None
+    if isinstance(target, DeviceInfo):
+        return target
+    if isinstance(target, list):
+        return target[0] if target else None
+    raise ConfigError(
+        "connect target must be DeviceInfo or list[DeviceInfo], "
+        f"not {type(target).__name__}; port name strings are not "
+        "accepted, use list_devices() to obtain a DeviceInfo"
+    )
 
 
 class HandlerCore(QObject):
@@ -142,24 +173,31 @@ class HandlerCore(QObject):
 
     # ty: ignore[invalid-method-override, missing-override-decorator] --
     # QObject has an unrelated C++ signal-connect overload with the same name.
-    def connect(self, target: str | DeviceInfo | None = None) -> None:
+    def connect(
+        self, target: DeviceInfo | list[DeviceInfo] | None = None
+    ) -> None:
         """Wait for discovery, opening and initialization to complete.
 
         Args:
-            target: None discovers devices, filtering only when the profile
-                supplies VID/PID; a port name bypasses that filter and probes
-                its baudrate. DeviceInfo with a known baudrate opens directly.
-                Work runs in background threads;
-                returning successfully means the connection is ready to send.
+            target: None (or an empty list) discovers devices, filtering
+                only when the profile supplies VID/PID. DeviceInfo opens
+                directly, using its baudrate or the profile's first rate;
+                a non-empty list keeps its first entry. Work runs in
+                background threads; returning successfully means the
+                connection is ready to send.
 
         Note:
             Waiting uses thread synchronization and needs no Qt event pumping.
             Call from an application worker thread to keep a UI responsive.
 
         Raises:
-            SerialForgeError: A connection is active, opening fails, discovery
-                finds no device, or another thread cancels this attempt.
+            ConfigError: The target is a port name string or another
+                unsupported type; use DeviceInfo from list_devices().
+            SerialForgeError: A connection is active, opening fails,
+                discovery finds no device, or another thread cancels
+                this attempt.
         """
+        resolved = normalize_connect_target(target)
         with self._state_lock:
             if self._state not in {
                 ConnectionState.DISCONNECTED,
@@ -173,11 +211,11 @@ class HandlerCore(QObject):
                 raise SerialForgeError(
                     "previous connection worker is still running"
                 )
-            worker = ConnectionWorker(self, target)
+            worker = ConnectionWorker(self, resolved)
             self._worker = worker
             self._transition(
                 ConnectionState.CONNECTING
-                if isinstance(target, DeviceInfo)
+                if isinstance(resolved, DeviceInfo)
                 else ConnectionState.PROBING
             )
             worker.start()

@@ -43,13 +43,11 @@ if TYPE_CHECKING:
 class ConnectionWorker(QThread):
     """Own connection attempts, command pumping, and automatic recovery."""
 
-    def __init__(
-        self, handler: HandlerCore, target: str | DeviceInfo | None
-    ) -> None:
+    def __init__(self, handler: HandlerCore, target: DeviceInfo | None) -> None:
         """Create a stopped worker for one explicit connection session."""
         super().__init__()
         self._handler: HandlerCore = handler
-        self._target: str | DeviceInfo | None = target
+        self._target: DeviceInfo | None = target
         self._stop: threading.Event = threading.Event()
         self._io_failed: threading.Event = threading.Event()
         self._transport: TransportProtocol | None = None
@@ -238,13 +236,12 @@ class ConnectionWorker(QThread):
         try:
             if self._stop.is_set():
                 raise PortNotFoundError("device discovery was cancelled")
-            results = finder.find(ScanMode.FIRST_MATCH, port=target)
+            results = finder.find(ScanMode.FIRST_MATCH)
         finally:
             self._finder = None
         if not results:
             raise PortNotFoundError(
-                "no matching serial device found on "
-                f"{target or 'available ports'}"
+                "no matching serial device found on available ports"
             )
         return results[0]
 

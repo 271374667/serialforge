@@ -110,11 +110,14 @@ ALL 查全部，FIRST_MATCH 协作取消并回收后至多返回一个。不同�
 ### 6.4 连接与关闭
 
 ```python
-def connect_sync(self, target: str | DeviceInfo = "") -> None:
+def connect_sync(self, target: DeviceInfo | list[DeviceInfo] | None = None) -> None:
     """先关闭旧连接，再阻塞发现、打开和初始化；成功返回表示可以发送。"""
 
-def connect_async(self, target: str | DeviceInfo = "") -> ConnectCall:
+def connect_async(self, target: DeviceInfo | list[DeviceInfo] | None = None) -> ConnectCall:
     """后台执行同一条连接路径；闭包在主线程收到已连接的 DeviceInfo。"""
+
+def list_devices(self) -> list[DeviceInfo]:
+    """枚举全部可用端口为未探测 DeviceInfo；不开口、不探测、不过滤。"""
 
 def disconnect(self) -> None:
     """停止并回收 I/O 线程；未完成调用以 CANCELLED 完成；重复调用无操作。"""
@@ -127,7 +130,7 @@ def set_init_sequence(self, items: Sequence[Spec[Any] | str]) -> None:
     """设置连接/重连后顺序执行的初始化命令；须已注册且参数完整。"""
 ```
 
-target="" 按保存策略发现首个设备；字符串端口绕过身份过滤但仍探测；有 baudrate 的 DeviceInfo 直接打开。失败抛 SerialForgeError，connect_sync 返回值继续 None。另一线程可通过 disconnect 取消未完成连接。
+target 语义（2026-10-20 用户覆盖）：只接受 `DeviceInfo | list[DeviceInfo] | None`；None 或空列表按保存策略自动发现；非空列表只取第一个；DeviceInfo 直接打开，无 baudrate 时用配置首档波特率。端口名字符串抛 ConfigError——端口名会随插拔变化，调用方应先用 `list_devices()` 枚举全部可用端口（不过滤 VID/PID、不探测、可先于 configure 调用、不影响扫描/连接互斥、排除已连接持有的端口）让用户选择，或用 scan_sync/scan_async 得到含波特率的 DeviceInfo。失败抛 SerialForgeError，connect_sync 返回值继续 None。另一线程可通过 disconnect 取消未完成连接。
 
 用户 2026-10-10 明确：同一个 SerialForge 实例最多管理一个设备连接。每次 connect_sync/connect_async 都先执行完整 disconnect，关闭旧串口并等待旧工作线程退出、终止旧日志会话、取消未完成命令和待投递成功回调、清空接收分片，再发起新连接。目标与旧设备相同也必须关闭重新连接，照常重新探测（端口名/自动发现）、打开和执行初始化序列；不作同设备短路。已有声明、配置和初始化序列保留。
 

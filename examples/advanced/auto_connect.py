@@ -11,8 +11,8 @@
 2. VID/PID 可以省略：省略时全部串口都会被探测，靠回复确认设备；给出时名单外的
    端口在打开前就被跳过，扫描明显更快
 3. ``scan_async()`` 的 ``ALL`` 与 ``FIRST_MATCH`` 两种完成策略
-4. 三种 ``connect_async()`` 入口：无参全自动 / 只给端口名 / 给已探测的
-   ``DeviceInfo``
+4. 三种 ``connect_async()`` 入口：无参全自动 / ``list_devices()`` 选出的
+   未探测 ``DeviceInfo`` / 已探测的 ``DeviceInfo``
 
 门面没有扫描完成或进度信号：结果由 ``ScanCall`` 的闭包或 ``result()`` 交付。
 虚拟设备（含一台 VID/PID 不匹配的干扰设备）见 ``examples/virtual_device.py``。
@@ -82,11 +82,29 @@ class AutoConnectDemo:
                 target,
                 f"DeviceInfo({target.port}@{target.baudrate})，跳过重新探测",
             )
-            # 入口 2：只给端口名——绕过 VID/PID 过滤，但仍要试候选波特率。
-            self._connect_and_hello(
-                target.port,
-                f"端口名 {target.port}，绕过 VID/PID 过滤",
+            # 入口 2：先 list_devices() 列出全部可用串口（不开口、不探测、
+            # 不按 VID/PID 过滤），再把选中的 DeviceInfo 传给连接接口。
+            # 端口名会随插拔变化，库不再接受直接传端口名字符串。未探测的
+            # DeviceInfo 没有波特率，会按当前配置的首档波特率直接打开，
+            # 所以这里只配置已知的那一档；不确定波特率就先 scan。
+            listed = self._forge.list_devices()
+            print(f"  可用串口: {[item.port for item in listed]}")
+            pick = next(
+                (item for item in listed if item.port == target.port), None
             )
+            if pick is None:
+                print("  目标端口不在可用列表中，跳过该入口")
+            else:
+                self._forge.configure(
+                    baudrates=[self._device.baud_rate],
+                    probe=self.VERSION,
+                    serial=SerialConfig(settle_time_s=0),
+                )
+                self._connect_and_hello(
+                    pick,
+                    f"list_devices() 选出的 DeviceInfo({pick.port})，"
+                    "按已知波特率直接打开",
+                )
             # 入口 3：什么都不给——库自己筛选、探测、连接。
             self._connect_and_hello(
                 None,
@@ -125,13 +143,13 @@ class AutoConnectDemo:
 
     def _connect_and_hello(
         self,
-        target: DeviceInfo | str | None,
+        target: DeviceInfo | list[DeviceInfo] | None,
         label: str,
     ) -> None:
         """异步连接指定目标，再用 send_async + 闭包取一条命令结果，然后断开。"""
         print(f"\n=== 连接入口：{label} ===")
         try:
-            connect_call = self._forge.connect_async(target or "")
+            connect_call = self._forge.connect_async(target)
             self._wait_until(lambda: connect_call.done, timeout_s=30.0)
             device = connect_call.result()
             print(f"  已连接 {device.port}，状态={self._forge.state.value}")

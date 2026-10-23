@@ -28,17 +28,21 @@ SerialForge 本体**不带 Qt**，只借用你环境里已有的 `QtCore`。所�
 ```python
 from serialforge import SerialForge
 
-def read_ping(forge: SerialForge) -> str:
+forge = SerialForge()
+
+def read_ping(forge: SerialForge) -> list[str]:
     """扫描、连接、发一条命令，返回设备回复。"""
     PING = forge.add(request="PING", pattern=r"PONG")
     devices = forge.scan_sync(baudrates=[115200], probe=PING)
     if not devices:
-        return ""
-    forge.connect_sync(devices[0])
+        return []
+    forge.connect_sync(devices)
     try:
-        return forge.send_sync(PING).data[0]
+        return forge.send_sync(PING).data
     finally:
         forge.disconnect()
+
+print(read_ping(forge))
 ```
 
 纯控制台脚本传 `SerialForge(application="core")` 即可自动托管事件循环；GUI 程序在已有 `QApplication` 的主线程直接创建 `forge = SerialForge()`。
@@ -73,23 +77,43 @@ def declare_commands(forge: SerialForge):
         r"CH(?P<channel>\d+):(?P<voltage>[\d\.]+)V",
         result_type=SensorData,
     )
+
+forge = SerialForge()
+declare_commands(forge)
 ```
 
-### 2. 带着上下文发命令（Context）
-在表格界面里，用户点了第 15 行的“刷新”按钮。300 毫秒后设备回包了，你的回调怎么知道该更新表格的第几行？
+### 2. 推荐的异步写法：闭包就地改界面，不卡主线程
+在桌面上位机里，最怕的就是点击一个按钮后整个界面直接“未响应”。
 
-以前你可能得在窗体类里搞个全局字典记住 request_id，生怕并发一高把行号搞窜。现在直接把你的私货塞进 `context`：
+传统的异步写法往往极其繁杂：在发命令的地方把请求扔出，在别处定义各种自定义 Qt Signal，或者在总体的接收槽函数里用一大长串 `if-elif` 逐个判断属于哪条指令的回包，还得在类里维护凌乱的字典或全局变量来记住“刚刚点了哪个控件”。一旦业务复杂，改个逻辑要在好几个分散的方法甚至文件之间来回跳跃排查。
+
+**SerialForge 推荐使用“异步发送 + 主线程闭包”的模式**：
 
 ```python
-from serialforge import SerialForge, Spec
+from serialforge import Message, SerialForge
 
-def send_with_context(forge: SerialForge, query: Spec[dict]):
-    # context 是一份只读便签，不会发到线路上，但会随结果原样返回
-    call = forge.send_async(query, context={"table_row": 15})
-    call.add_done_callback(
-        lambda msg: print(f"更新第 {msg.context['table_row']} 行: {msg.data[0]}")
-    )
+class MainWindow:
+    def __init__(self):
+        self.forge = SerialForge()
+        # 集中声明业务命令（定义一次，多次复用）
+        self.GET_TEMP = self.forge.add("GET_TEMP", r"TEMP:\s*(?P<val>[\d\.]+)", result_type=float)
+
+    def on_refresh_clicked(self):
+        """点击刷新按钮：请求发起与界面更新完整收拢在这一个函数内"""
+        def on_done(message: Message[float]) -> None:
+            # ① 回调统一排队回 Qt 主线程，在闭包里直接写操作界面的代码，安全且直观
+            self.temp_label.setText(f"{message.data[0]:.1f} ℃")
+            self.refresh_btn.setEnabled(True)
+
+        # ② 异步发起请求，后台处理串口 I/O 与解析，绝不卡住主线程
+        self.refresh_btn.setEnabled(False)
+        self.forge.send_async(self.GET_TEMP).add_done_callback(on_done)
 ```
+
+这种写法的优势非常直观：
+- **绝不卡住主线程**：所有串口 I/O、切帧定界、超时检测都在后台线程执行，界面操作丝滑不卡顿。
+- **直接在回调里写界面代码**：`add_done_callback` 的闭包统一由 Qt 事件循环调度回主线程运行，拿到了数据直接调用控件方法（如 `setText`、`setEnabled`），无需自己手写跨线程信号与槽。
+- **逻辑高内聚，方便封装和调试**：从“点击按钮禁用控件”、“异步发送”到“回包后更新界面并恢复控件”，完整的业务逻辑全收拢在同一个函数里面。闭包能顺手捕获控件和当前局部变量，不用在类里记凌乱的中间状态；未来无论是封装新功能还是定位调试，看这一个函数就能看懂全貌。
 
 ### 3. 急事可以插队（URGENT 优先级）
 队列里排了 10 条轮询传感器数据的指令，操作员突然按了红色的“紧急停机”按钮。如果按传统的 FIFO 队列慢慢排，等轮到停机命令时黄花菜都凉了。

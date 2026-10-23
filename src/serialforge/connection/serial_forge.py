@@ -27,8 +27,12 @@ from serialforge.advanced import (
 from serialforge.connection.command_call import CommandCall
 from serialforge.connection.command_registry import CommandRegistry
 from serialforge.connection.connect_call import ConnectCall
-from serialforge.connection.handler_core import HandlerCore
+from serialforge.connection.handler_core import (
+    HandlerCore,
+    normalize_connect_target,
+)
 from serialforge.connection.scan_call import ScanCall
+from serialforge.discovery import enumerate_ports
 from serialforge.discovery.device_finder import DeviceFinder
 from serialforge.enums import (
     ConnectionState,
@@ -858,16 +862,45 @@ class SerialForge(QObject):
             if self._finder is not None:
                 self._finder.cancel()
 
-    def connect_sync(self, target: str | DeviceInfo = "") -> None:
+    def list_devices(self) -> list[DeviceInfo]:
+        """Return every available serial port as an unprobed DeviceInfo.
+
+        Enumeration reads backend descriptors without opening ports,
+        probing baudrates or applying the configured VID/PID filter, so
+        it works before configure and never conflicts with an active
+        scan or connection. Port names change between sessions and
+        replugs; never hard-code them. Pick a DeviceInfo from this list
+        (or from scan_sync/scan_async, which also probes baudrates) and
+        pass it to connect_sync/connect_async.
+
+        Returns:
+            One DeviceInfo per available port, excluding ports owned by
+            an active connection. DeviceInfo from this list carries no
+            baudrate; connecting opens it with the profile's first
+            configured baudrate.
+        """
+        return enumerate_ports()
+
+    def connect_sync(
+        self, target: DeviceInfo | list[DeviceInfo] | None = None
+    ) -> None:
         """Close the previous session, then block until the target is ready.
 
         Even the same target starts a fresh connection and initialization.
         Pending calls and callbacks are cancelled before opening the target.
         Use connect_async for a main-thread callback instead of blocking.
-        """
-        self._connect_request(target or None)
 
-    def connect_async(self, target: str | DeviceInfo = "") -> ConnectCall:
+        Args:
+            target: DeviceInfo opens directly with its baudrate, or the
+                profile's first rate when unprobed. A non-empty list
+                keeps its first entry; None or an empty list discovers
+                devices automatically using the saved configuration.
+        """
+        self._connect_request(normalize_connect_target(target))
+
+    def connect_async(
+        self, target: DeviceInfo | list[DeviceInfo] | None = None
+    ) -> ConnectCall:
         """Start a connection in a worker thread and return its call handle.
 
         The worker first disconnects the current session, exactly like
@@ -875,7 +908,13 @@ class SerialForge(QObject):
         DeviceInfo on the Qt main thread, so the caller never blocks. Failures
         never run a success closure and are raised by result(). cancel()
         stops a pending attempt and suppresses callbacks.
+
+        Args:
+            target: Same semantics as connect_sync: DeviceInfo opens
+                directly, a non-empty list keeps its first entry, and
+                None or an empty list discovers automatically.
         """
+        resolved = normalize_connect_target(target)
         with self._lock:
             self._require_core()
             if (
@@ -891,7 +930,6 @@ class SerialForge(QObject):
             )
             self._async_connect = call
             self._async_connect_active = True
-            resolved = target or None
 
             def run_connect() -> None:
                 error: Exception | None = None
@@ -940,7 +978,7 @@ class SerialForge(QObject):
 
     def _connect_request(
         self,
-        target: str | DeviceInfo | None,
+        target: DeviceInfo | None,
         *,
         cancel_event: threading.Event | None = None,
     ) -> DeviceInfo:

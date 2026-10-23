@@ -2,9 +2,48 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from serialforge.models import DeviceInfo, DeviceProfile
 from serialforge.protocols import PortBackend
-from serialforge.transport import PortRegistry
+from serialforge.transport import BackendSwitch, PortRegistry
+
+# Descriptor access stays duck-typed at this backend adaptation boundary.
+
+
+def _device_from_descriptor(descriptor: Any) -> DeviceInfo | None:
+    """Map one backend descriptor to an unprobed DeviceInfo record."""
+    name = getattr(descriptor, "device", None)
+    if not isinstance(name, str):
+        return None
+    return DeviceInfo(
+        port=name,
+        vid=getattr(descriptor, "vid", None),
+        pid=getattr(descriptor, "pid", None),
+        serial_number=getattr(descriptor, "serial_number", None),
+        location=getattr(descriptor, "location", None),
+        description=getattr(descriptor, "description", None),
+    )
+
+
+def enumerate_ports() -> list[DeviceInfo]:
+    """Return every available port as an unprobed DeviceInfo record.
+
+    Descriptors come from the active backend without opening serial
+    ports, probing baudrates or filtering by USB identity, so callers
+    can list choices before configuring a profile. Ports owned by an
+    active connection are excluded because they cannot be opened.
+    """
+    matches: list[DeviceInfo] = []
+    for descriptor in BackendSwitch.current().list_ports():
+        device = _device_from_descriptor(descriptor)
+        if device is None:
+            continue
+        if PortRegistry.is_owned(device.port):
+            continue
+        matches.append(device)
+    return matches
+
 
 # The scanner is a small stateless adapter with one public operation.
 # pylint: disable=too-few-public-methods
@@ -47,4 +86,4 @@ class PortScanner:
         return matches
 
 
-__all__ = ["PortScanner"]
+__all__ = ["PortScanner", "enumerate_ports"]

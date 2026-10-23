@@ -1,6 +1,6 @@
 # serialforge · 架构总览
 
-> 类型: 活文档（原地更新，不编号、不归档）  |  最后更新: 2026-10-19
+> 类型: 活文档（原地更新，不编号、不归档）  |  最后更新: 2026-10-20
 > 基线 commit: d9e6ed4（扫描/连接同步异步拆分与探测加固）  |  适用版本: 0.0.1
 > 形态: 完整  |  维护: AI 更新（见 `.agents/rules/15_architecture_doc.md`）
 > 读法: 第 1、2、3、6 节为必读区（每次会话读，合计 ≤150 行）；其余按需读
@@ -95,6 +95,7 @@
 
 | 日期 | commit | 改了什么 |
 | --- | --- | --- |
+| 2026-10-20 | 本次提交 | 连接目标规范化（2026-10-20 用户要求）：`connect_sync`/`connect_async` 只接受 `DeviceInfo | list[DeviceInfo] | None`，端口名字符串抛 `ConfigError`；非空列表只取第一个，空列表与 None 同为自动发现；新增 `SerialForge.list_devices()` 枚举全部可用端口为未探测 `list[DeviceInfo]`（不开口、不探测、不按 VID/PID 过滤、可先于 configure 调用，已连接端口除外）；discovery 层新增 `enumerate_ports()`；API 快照、测试与示例同步，公开 docs/README 待用户确认后更新 |
 | 2026-10-19 | 本次提交 | 公开文档去模板化并统一品牌名：介绍文字用 `SerialForge`，安装命令/包名/import/URL 保持小写 `serialforge`；删除“只做一件事/不是 A 而是 B/先放一边”等句式，快速开始不再从 `serialforge.qt_core` 导入 Qt 类，改为使用方自己的 PySide6/PyQt 绑定创建应用；`SerialForge` 在无应用实例时抛出明确 `ConfigError`，示例用 `examples/qt_app.py` 垫片兼容三套绑定，新增宿主应用与缺失应用测试 |
 | 2026-10-19 | 本次提交 | 文档语言改为面向“只懂 Qt、第一次接触串口”的口语化写法：进阶页用比喻展开概念，新增 `docs/appendix/glossary.md` 术语表（顶部“附录”Tab），正文首次出现的串口/线程/协议术语链到对应锚点；README 与入门页同步 |
 | 2026-10-19 | 本次提交 | 文档按难度分层并启用顶部 Tab：`新手入门`（`docs/index.md` + `docs/beginner/`）只保留最小可用路径，`进阶指南`（`docs/advanced/`）按功能拆页，示例页拆成简单/完整两页；示例目录拆为 `examples/simple/`（同步、异步各一个短脚本）与 `examples/advanced/`（原有四个完整示例），测试、CI、源码 docstring 与文档引用同步 |
